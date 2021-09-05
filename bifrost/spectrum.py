@@ -464,12 +464,17 @@ class Spectra(dict):
             for item, r_vi in zip(self, r_v):
                 self[item].apply_corrections(r_v=r_vi)
 
-    def plot_spectra(self, fname_root):
+    def plot_spectra(self, fname_root, spectra='all'):
         print('Plotting spectra...')
         if not os.path.exists(fname_root):
             os.makedirs(fname_root)
-        for item in tqdm.tqdm(self):
-            self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum.html'))
+        if spectra == 'all':
+            for item in tqdm.tqdm(self):
+                self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum.html'))
+        else:
+            slist = [self[s] for s in spectra]
+            for item in tqdm.tqdm(slist):
+                item.plot(fname=os.path.join(fname_root, item.name.replace(' ', '_')+'.spectrum.html'))
 
     def get_spec_index(self, name):
         """
