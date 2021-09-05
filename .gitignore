@@ -1,0 +1,9 @@
+data/
+data.stacked*/
+spectra/
+.idea/**
+**/__pycache__/
+
+*.pkl
+*.pdf
+*.json

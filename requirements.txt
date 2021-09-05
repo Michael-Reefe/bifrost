@@ -1,0 +1,8 @@
+numpy>=1.20.3
+numba>=0.53.1
+tqdm>=4.61.2
+matplotlib>=3.4.2
+plotly>=4.14.3
+astropy>=4.2.1
+astroquery>=0.4.2
+spectres>=2.1.1
