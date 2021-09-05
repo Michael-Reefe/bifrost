@@ -1,3 +1,4 @@
+# Internal python modules
 import os
 import time
 import pickle
@@ -5,6 +6,7 @@ import json
 import copy
 import gc
 
+# External packages
 import tqdm
 import numpy as np
 from numba import jit, njit, prange
@@ -22,6 +24,7 @@ import astropy.convolution
 import astroquery.irsa_dust
 import spectres
 
+# Bifrost packages
 import bifrost.utils as utils
 
 
@@ -31,15 +34,15 @@ class Spectrum:
 
     def __init__(self, wave, flux, error, redshift=None, ebv=None, name='Generic', output_path=None):
         """
-        A class for a single spectrum.
+        A class containing data and attributes for a single spectrum of an astronomical object.
 
         :param wave: np.ndarray
             Array of the observed wavelength range of the spectrum, not corrected for redshift, in angstroms.
         :param flux: np.ndarray
             Array of the observed flux of the object over the wavelength range, not corrected for extinction, in
-            10^-17 erg cm^-2 s^-1 ang^-1.
+            10^-17 erg cm^-2 s^-1 angstrom^-1.
         :param error: np.ndarray
-            Array of the error associated with the observed flux.
+            Array of the error associated with the observed flux, also in units of 10^-17 erg cm^-2 s^-1 angstrom^-1.
         :param redshift: float
             Redshift of the object in units of c.
             ***IMPORTANT***
@@ -49,6 +52,10 @@ class Spectrum:
             Extinction (B-V) color of the object in mag.
             ***IMPORTANT***
             If none is provided, it is assumed the given flux is already corrected for galactic extinction.
+        :param name: str
+            An identifier for the object spectrum.
+        :param output_path: str
+            A directory where saved files will default to if none is given.
         """
         # Observed wavelength array in angstroms
         self.wave = wave
@@ -82,6 +89,11 @@ class Spectrum:
         return s
 
     def _verify(self):
+        """
+        Verify that the information in the object makes sense.  i.e. the size of wave, flux, and error are all the same.
+
+        :return None:
+        """
         assert self.wave.size == self.flux.size == self.error.size, \
             "Wave, flux, and error arrays must be the same size!"
 
@@ -89,8 +101,9 @@ class Spectrum:
         """
         Apply all corrections to the spectrum: redshift and extinction
 
-        :param r_v: extinction ratio A(V)/E(B-V), default 3.1
-        :return: None
+        :param r_v: float
+            extinction ratio A(V)/E(B-V), default 3.1
+        :return None:
         """
         if not self._corrected:
             if self.redshift:
@@ -116,6 +129,13 @@ class Spectrum:
     def calc_rest_frame(wave, redshift):
         """
         Calculate the rest frame wavelengths of the object from the redshift.
+
+        :param wave: np.ndarray
+            The wavelength array
+        :param redshift: float
+            The redshift of the object
+        :return wave: np.ndarray
+            The redshift-corrected wavelength array.
         """
         wave /= (1+redshift)
         return wave
@@ -126,14 +146,19 @@ class Spectrum:
         Deredden a flux vector using the CCM 1989 parameterization
         Returns an array of the unreddened flux
 
-        OPTIONAL INPUT:
-        r_v - float specifying the ratio of total selective
-              extinction R(V) = A(V)/E(B-V). If not specified,
-              then r_v = 3.1
-
-        OUTPUTS:
-        funred - unreddened calibrated flux array, same number of
-                 elements as wave
+        :param wave: np.ndarray
+            The wavelength vector.
+        :param flux: np.ndarray
+            The flux vector to be corrected.
+        :param ebv: float
+            E(B-V) in magintudes.
+        :param r_v: optional, float
+            specifies the ratio of total selective
+            extinction R(V) = A(V)/E(B-V). If not specified,
+            then r_v = 3.1
+        :return flux: np.ndarray
+            The unreddened calibrated flux array, same number of
+            elements as wave
 
         NOTES:
         0. This function was taken from BADASS3, created by Remington Sexton, https://github.com/remingtonsexton/BADASS3.
@@ -251,10 +276,30 @@ class Spectrum:
 
     def plot(self, convolve_width=3, emline_color="rebeccapurple", absorp_color="darkgoldenrod", overwrite=False,
              fname=None, backend='plotly', normalized=False):
+        """
+        Plot the spectrum.
+
+        :param convolve_width: optional, int
+            The width of convolution performed before plotting the spectrum with a Box1DKernel
+        :param emline_color: optional, str
+            If backend is pyplot, this specifies the color of emission lines plotted.  Default is 'rebeccapurple'.
+        :param absorp_color: optional, str
+            If backend is pyplot, this specifies the color of absorption lines plotted.  Default is 'darkgoldenrod'.
+        :param overwrite: optional, bool
+            If true, overwrites the file if it already exists.  Otherwise it is not replotted.  Default is false.
+        :param fname: optional, str
+            The path and file name to save the plot to.
+        :param backend: optional, str
+            May be 'pyplot' to use the pyplot module or 'plotly' to use the plotly module for plotting.  Default is 'plotly'.
+        :param normalized: optional, bool
+            If true, the y axis units are displayed as "normalized".  Otherwise, they are displayed as "10^-17 erg cm^-2 s^-1 angstrom^-1".
+            Default is false.
+        :return None:
+        """
         # Make sure corrections have been applied
         self.apply_corrections()
         if not fname:
-            fname = os.path.join(self.output_path, self.name.replace(' ', '_')+'.spectrum.pdf')
+            fname = os.path.join(self.output_path, self.name.replace(' ', '_')+'.spectrum') + ('.pdf', '.html')[backend == 'plotly']
         if os.path.exists(fname) and not overwrite:
             return
 
@@ -347,6 +392,11 @@ class Spectrum:
 
 
     def save_pickle(self):
+        """
+        Save the object contents to a pickle file
+
+        :return None:
+        """
         with open(os.path.join(self.output_path, self.name.replace(' ', '_')+'.data.pkl'), 'wb') as handle:
             pickle.dump(self, handle)
 
@@ -360,7 +410,8 @@ class Spectrum:
             The path to the fits file
         :param name: str
             The name of the spectrum.
-        :return: a Spectrum object
+        :return cls: Spectrum
+            The Spectrum object created from the fits file.
         """
         # Load the data
         with astropy.io.fits.open(filepath) as hdu:
@@ -436,16 +487,21 @@ class Spectrum:
 
 class Spectra(dict):
 
+    """
+    An extension of the base Python dictionary for storing Spectrum objects.
+    """
+
     default_keys = Spectrum.__slots__
 
     def to_numpy(self, keys=None):
-        """Unpacks values to a dict of numpy arrays.
+        """
+        Unpacks values to a dict of numpy arrays.
 
-        Args:
-            keys (iterable or string): A tuple of strings containing the keys to unpack, defaults to None for all keys.
+        :param keys: str, iterable
+            A list of strings containing the keys to unpack, defaults to None for all keys.
 
-        Returns:
-            dict: A dictionary containing the numpy arrays.
+        :return out: dict
+            A dictionary containing the numpy arrays.
         """
         if keys is None:
             keys = self.default_keys
@@ -462,13 +518,23 @@ class Spectra(dict):
     def add_spec(self, spec):
         """
         Add a spectrum to the spectra dictionary with spec.name as a key.
+
         :param spec: Spectrum object
+            The object to add to the dictionary.
         :return: None
         """
         self[spec.name] = spec
 
-    def correct_spectra(self, r_v):
-        if type(r_v) not in (list, np.ndarray):
+    def correct_spectra(self, r_v=3.1):
+        """
+        Apply velocity and extinction corrections to all spectra in the dictionary.
+
+        :param r_v: float, iterable
+            The extinction ratio (or ratios) A(V)/E(B-V) to use in the corrections for each spectrum.
+            If float, the same correction is applied to all spectra.  Default is 3.1
+        :return None:
+        """
+        if type(r_v) not in (list, tuple, np.ndarray):
             for item in self:
                 self[item].apply_corrections(r_v=r_v)
         else:
@@ -476,6 +542,15 @@ class Spectra(dict):
                 self[item].apply_corrections(r_v=r_vi)
 
     def plot_spectra(self, fname_root, spectra='all'):
+        """
+        Plot a series of spectra from the dictionary.
+
+        :param fname_root: str
+            The parent directory to save all plot figures to.
+        :param spectra: str, iterable
+            Dictionary keys of which spectra to plot. If 'all', all are plotted.  Defaults to all.
+        :return None:
+        """
         print('Plotting spectra...')
         if not os.path.exists(fname_root):
             os.makedirs(fname_root)
@@ -490,17 +565,22 @@ class Spectra(dict):
     def get_spec_index(self, name):
         """
         Get the relative position in the dictionary (as an int) of a spectra given its name.
+
+        :param name: str
+            The key of the item in the dictionary.
         :return: int
-            The index
+            The index of the key in the dictionary.
         """
         return list(self.keys()).index(name)
 
     def get_spec_name(self, index):
         """
         Get the name of a spectra given its position in the dictionary (as an int).
-        :param index:
+
+        :param index: int
+            The position of the item in the dictionary.
         :return: str
-            The name
+            The key of the dictionary entry.
         """
         return list(self.keys())[index]
 
@@ -534,10 +614,24 @@ class Spectra(dict):
         return f"A collection of {len(self)} spectra."
 
     def save_pickle(self, filepath):
+        """
+        Save the object contents to a pickle file.
+
+        :param filepath: str
+            The path to save the pickle file to.
+        :return None:
+        """
         with open(filepath, 'wb') as handle:
             pickle.dump(self, handle)
 
     def save_json(self, filepath):
+        """
+        Save the object contents to a json file.
+
+        :param filepath: str
+            The path to save the json file to.
+        :return None:
+        """
         with open(filepath, 'w') as handle:
             serializable = copy.deepcopy(self)
             for key in serializable.keys():
@@ -552,15 +646,22 @@ class Spectra(dict):
 class Stack(Spectra):
 
     def __init__(self, **options):
+        """
+        An extension of the Spectra class (and by extension, the dictionary) specifically for stacking purposes.
+
+        """
         blueprints = {
             'r_v': 3.1,                # Extinction ratio A(V)/E(B-V) to calculate for
             'gridspace': 1,            # Spacing of the wavelength grid
             'tolerance': 500,          # Tolerance for throwing out spectra that are > tolerance angstroms apart from others
             'norm_region': None        # Wavelength bounds to use for the normalization region, with no prominent lines
         }
+        # Edit the blueprints dictionary with any user-specified options
         for option in options:
             blueprints[option] = options[option]
+        # Update the object using the blueprints dictionary
         self.__dict__.update(**blueprints)
+        # Default object properties that will be filled in later
         self.universal_grid = None
         self.stacked_flux = None
         self.stacked_err = None
@@ -569,6 +670,13 @@ class Stack(Spectra):
         super().__init__()
 
     def calc_norm_region(self):
+        """
+        Calculate the optimal region to perform normalization. Finds the largest span of wavelengths between
+        absportion lines that is also covered by all the spectra in the dictionary.  Fails if no such region can
+        be found.  The region is set to the instance attribute self.norm_region.
+
+        :return None:
+        """
         emlines = np.array([1033.820, 1215.240, 1240.810, 1305.530, 1335.310, 1397.610, 1399.800, 1549.480, 1640.400,
                             1665.850, 1857.400, 1908.734, 2326.000, 2439.500, 2799.117, 3346.790, 3426.850, 3727.092,
                             3729.875, 4102.890, 4341.680, 4364.436, 4862.680, 4960.295, 5008.240, 6300.304, 6363.776,
@@ -590,6 +698,23 @@ class Stack(Spectra):
     # Allow the class to be called as a way to perform the stacking
     @utils.timer(name='Stack Procedure')
     def __call__(self):
+        """
+        The main procedure for stacking spectra.  Performs all necessary steps at once:
+            1. Convert each spectra to their rest-frame wavelengths using their redshifts.
+            2. Correct each spectra's flux for galactic extinction.
+            3. Find the optimal, universal wavelength grid that is in a region shared by all spectra and with uniform spacing.
+            4. Resample each spectrum in the dictionary onto the universal grid, while conserving flux and flux error.
+            5. Normalize each spectrum to the median value in the normalization region.
+            6. Coadd each spectrum together using 1/error^2 as the weights at each pixel value.
+            7. Coadd the errors for each spectrum together again using 1/error^2 as the weights at each pixel value.
+
+        :return self.universal_grid: np.ndarray
+            The universal, uniform wavelength grid
+        :return self.stacked_flux: np.ndarray
+            The co-added flux.
+        :return self.stacked_err: np.ndarray
+            The co-added error.
+        """
         self.correct_spectra()
         if type(self.universal_grid) is not np.ndarray:
             self.uniform_wave_grid()
@@ -601,6 +726,11 @@ class Stack(Spectra):
         return self.universal_grid, self.stacked_flux, self.stacked_err
 
     def correct_spectra(self):
+        """
+        Spectra.correct_spectra method now using the instance attribute self.r_v as the argument
+        
+        :return None:
+        """
         print('Correcting spectra to rest-frame wavelengths and adjusting for galactic extinction...')
         super().correct_spectra(r_v=self.r_v)
 
@@ -608,6 +738,8 @@ class Stack(Spectra):
         """
         Create a uniform grid of wavelengths with spacing gridspace, covering only the regions where all spectra in
         the dictionary overlap.
+
+        :return None:
         """
         print('Calculating a universal wave grid...')
         wave = self.to_numpy('wave')['wave']
@@ -639,6 +771,7 @@ class Stack(Spectra):
         """
         Resample the current spectra to a new, uniform wavelength grid while preserving flux and error across the
         interpolation.
+
         :return None:
         """
         print('Resampling spectra over a uniform wave grid...')
@@ -650,6 +783,7 @@ class Stack(Spectra):
     def normalize(self):
         """
         Normalize all spectra by the median of the normalization region.
+
         :return None:
         """
         print('Normalizing spectra...')
@@ -666,7 +800,8 @@ class Stack(Spectra):
     def coadd(self):
         """
         Coadd all spectra together into a single, stacked spectrum, using 1/sigma**2 as the weights.
-        :return:
+
+        :return None:
         """
         self.stacked_flux = np.zeros_like(self.universal_grid, dtype=np.float64)
         self.stacked_err = np.zeros_like(self.universal_grid, dtype=np.float64)
@@ -685,6 +820,20 @@ class Stack(Spectra):
             self.stacked_err[j] = np.sqrt(variance)
 
     def plot_stacked(self, fname, emline_color="rebeccapurple", absorp_color="darkgoldenrod", backend='plotly'):
+        """
+        Plot the stacked spectrum.
+
+        :param fname: str
+            The path and file name to save the figure to.
+        :param emline_color: str
+            If backend is 'pyplot', this specifies the color of the plotted emission lines.  Default is 'rebeccapurple'.
+        :param absorp_color: str
+            If backend is 'pyplot', this specifies the color of the plotted absorption lines. Default is 'darkgoldenrod'.
+        :param backend: str
+            May be 'pyplot' to use the pyplot module or 'plotly' to use the plotly module for plotting.  Default is
+            'plotly'.
+        :return None:
+        """
         assert self.universal_grid is not None, "Universal grid has not yet been calculated!"
         assert self.stacked_flux is not None, "Stacked flux has not yet been calculated!"
         assert self.stacked_err is not None, "Stacked error has not yet been calculated!"
@@ -764,6 +913,10 @@ class Stack(Spectra):
             fig.write_html(fname)
 
     def plot_spectra(self, fname_root, spectra='all'):
+        """
+        Spectra.plot_spectra but incorporates the information from self.normalized.
+
+        """
         print('Plotting spectra...')
         if not os.path.exists(fname_root):
             os.makedirs(fname_root)
@@ -778,6 +931,9 @@ class Stack(Spectra):
                           normalized=self.normalized)
 
     def save_json(self, filepath):
+        """
+         Spectra.save_json but also converts universal_grid, stacked_flux, and stacked_err to lists.
+        """
         with open(filepath, 'w') as handle:
             serializable = copy.deepcopy(self)
             for key in serializable.keys():
