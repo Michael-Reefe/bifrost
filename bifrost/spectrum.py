@@ -3,6 +3,7 @@ import time
 import pickle
 import json
 import copy
+import gc
 
 import tqdm
 import numpy as np
@@ -249,7 +250,7 @@ class Spectrum:
         return flux  # ,a_lambda
 
     def plot(self, convolve_width=3, emline_color="rebeccapurple", absorp_color="darkgoldenrod", overwrite=False,
-             fname=None, backend='plotly'):
+             fname=None, backend='plotly', normalized=False):
         # Make sure corrections have been applied
         self.apply_corrections()
         if not fname:
@@ -293,7 +294,10 @@ class Spectrum:
             # Set up axis labels and formatting
             fontsize = 20
             ax.set_xlabel(r'$\lambda_{\rm{rest}}$ ($\rm{\AA}$)', fontsize=fontsize)
-            ax.set_ylabel(r'$f_\lambda$ ($10^{-17}$ erg cm$^{-2}$ s$^{-1}$ $\rm{\AA}^{-1}$)', fontsize=fontsize)
+            if not normalized:
+                ax.set_ylabel(r'$f_\lambda$ ($10^{-17}$ erg cm$^{-2}$ s$^{-1}$ $\rm{\AA}^{-1}$)', fontsize=fontsize)
+            else:
+                ax.set_ylabel(r'$f_\lambda$ (normalized)', fontsize=fontsize)
             ax.set_title('%s, $z=%.3f$' % (self.name, self.redshift), fontsize=fontsize)
             ax.tick_params(axis='both', labelsize=fontsize-2)
             ax.set_xlim(np.nanmin(self.wave), np.nanmax(self.wave))
@@ -321,8 +325,12 @@ class Spectrum:
                 fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#663399')
             for line in abslines:
                 fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#d1c779')
+            if not normalized:
+                y_title = 'f<sub>&#955;</sub> (10<sup>-17</sup> erg cm<sup>-2</sup> s<sup>-1</sup> &#8491;<sup>-1</sup>)'
+            else:
+                y_title = 'f<sub>&#955;</sub> (normalized)'
             fig.update_layout(
-                yaxis_title='f<sub>&#955;</sub> (10<sup>-17</sup> erg cm<sup>-2</sup> s<sup>-1</sup> &#8491;<sup>-1</sup>)',
+                yaxis_title=y_title,
                 xaxis_title='&#955;<sub>rest</sub> (&#8491;)',
                 title='%s, z=%.3f' % (self.name, self.redshift),
                 hovermode='x'
@@ -355,18 +363,17 @@ class Spectrum:
         :return: a Spectrum object
         """
         # Load the data
-        hdu = astropy.io.fits.open(filepath)
+        with astropy.io.fits.open(filepath) as hdu:
 
-        specobj = hdu[2].data
-        z = specobj['z'][0]
-        z = specobj['z'][0]
-        try:
-            ra = hdu[0].header['RA']
-            dec = hdu[0].header['DEC']
-        except:
-            ra = specobj['PLUG_RA'][0]
-            dec = specobj['PLUG_DEC'][0]
-        t = hdu[1].data
+            specobj = hdu[2].data
+            z = specobj['z'][0]
+            try:
+                ra = hdu[0].header['RA']
+                dec = hdu[0].header['DEC']
+            except:
+                ra = specobj['PLUG_RA'][0]
+                dec = specobj['PLUG_DEC'][0]
+            t = hdu[1].data
 
         hdu.close()
         del hdu
@@ -376,6 +383,10 @@ class Spectrum:
         wave = np.power(10, t['loglam'])
         error = np.sqrt(1/t['ivar'])
         and_mask = t['and_mask']
+
+        del t
+        del specobj
+        gc.collect()
 
         ### Interpolating over bad pixels ###
         bad = np.where(~np.isfinite(flux) & ~np.isfinite(error))[0]
@@ -450,7 +461,7 @@ class Spectra(dict):
 
     def add_spec(self, spec):
         """
-        Add a spectrum to the spectra disctionary with spec.name as a key.
+        Add a spectrum to the spectra dictionary with spec.name as a key.
         :param spec: Spectrum object
         :return: None
         """
@@ -553,6 +564,8 @@ class Stack(Spectra):
         self.universal_grid = None
         self.stacked_flux = None
         self.stacked_err = None
+        self.resampled = False
+        self.normalized = False
         super().__init__()
 
     def calc_norm_region(self):
@@ -577,18 +590,18 @@ class Stack(Spectra):
     # Allow the class to be called as a way to perform the stacking
     @utils.timer(name='Stack Procedure')
     def __call__(self):
-        print('Correcting spectra to rest-frame wavelengths and adjusting for galactic extinction...')
         self.correct_spectra()
-        print('Resampling spectra over a uniform wave grid...')
-        self.uniform_wave_grid()
-        self.resample()
-        print('Normalizing spectra...')
-        self.normalize()
-        print('Coadding spectra...')
+        if type(self.universal_grid) is not np.ndarray:
+            self.uniform_wave_grid()
+        if not self.resampled:
+            self.resample()
+        if not self.normalized:
+            self.normalize()
         self.coadd()
         return self.universal_grid, self.stacked_flux, self.stacked_err
 
     def correct_spectra(self):
+        print('Correcting spectra to rest-frame wavelengths and adjusting for galactic extinction...')
         super().correct_spectra(r_v=self.r_v)
 
     def uniform_wave_grid(self):
@@ -596,6 +609,7 @@ class Stack(Spectra):
         Create a uniform grid of wavelengths with spacing gridspace, covering only the regions where all spectra in
         the dictionary overlap.
         """
+        print('Calculating a universal wave grid...')
         wave = self.to_numpy('wave')['wave']
         wmin = -1
         wmax = 1e10
@@ -615,10 +629,10 @@ class Stack(Spectra):
                 else:
                     wmax = imax
             if remove:
-                print(f"WARNING: Removing spectrum {i}: {all_names[i]} due to insufficient wavelength coverage.")
+                print(f"WARNING: Removing spectrum {i+1}: {all_names[i]} due to insufficient wavelength coverage.")
                 del self[all_names[i]]
 
-        wave_grid = np.arange(wmin, wmax+self.gridspace, self.gridspace)
+        wave_grid = np.arange(int(wmin), int(wmax)+self.gridspace, self.gridspace)
         self.universal_grid = wave_grid
 
     def resample(self):
@@ -627,15 +641,18 @@ class Stack(Spectra):
         interpolation.
         :return None:
         """
+        print('Resampling spectra over a uniform wave grid...')
         for ispec in tqdm.tqdm(self):
-            self[ispec].flux, self[ispec].error = spectres.spectres(self.universal_grid, self[ispec].wave, self[ispec].flux, spec_errs=self[ispec].error)
+            self[ispec].flux, self[ispec].error = spectres.spectres(self.universal_grid, self[ispec].wave, self[ispec].flux, spec_errs=self[ispec].error, fill=np.nan)
             self[ispec].wave = self.universal_grid
+        self.resampled = True
 
     def normalize(self):
         """
         Normalize all spectra by the median of the normalization region.
         :return None:
         """
+        print('Normalizing spectra...')
         if not self.norm_region:
             self.calc_norm_region()
         # Use the first spectra's wave since by this point they should all be equal anyways, to calculate the region to fit
@@ -644,22 +661,27 @@ class Stack(Spectra):
             med = np.nanmedian(self[ispec].flux[reg])
             self[ispec].flux /= med
             self[ispec].error /= med
+        self.normalized = True
 
     def coadd(self):
         """
         Coadd all spectra together into a single, stacked spectrum, using 1/sigma**2 as the weights.
         :return:
         """
-        self.stacked_flux = np.zeros_like(self.universal_grid)
-        self.stacked_err = np.zeros_like(self.universal_grid)
+        self.stacked_flux = np.zeros_like(self.universal_grid, dtype=np.float64)
+        self.stacked_err = np.zeros_like(self.universal_grid, dtype=np.float64)
+
+        print('Coadding spectra...')
         for i in tqdm.trange(len(self.universal_grid)):
-            self.stacked_flux[i] = np.sum([self[name].flux[i]/self[name].error[i]**2 for name in self]) \
-                                   / np.sum([1/self[name].error[i]**2 for name in self])
+            self.stacked_flux[i] = np.nansum([self[name].flux[i]/self[name].error[i]**2 for name in self]) \
+                                   / np.nansum([1/self[name].error[i]**2 for name in self])
+
+        print('Coadding errors...')
         for j in tqdm.trange(len(self.universal_grid)):
             weights = np.array([1/self[name].error[j]**2 for name in self])
             M = len(np.where(weights > 0)[0])
-            variance = np.sum([(self[name].flux[j] - self.stacked_flux[j])**2 / self[name].error[j]**2 for name in self]) \
-                       / ((M-1)/M * np.sum(weights))
+            variance = np.nansum([(self[name].flux[j] - self.stacked_flux[j])**2 / self[name].error[j]**2 for name in self]) \
+                       / ((M-1)/M * np.nansum(weights))
             self.stacked_err[j] = np.sqrt(variance)
 
     def plot_stacked(self, fname, emline_color="rebeccapurple", absorp_color="darkgoldenrod", backend='plotly'):
@@ -741,6 +763,20 @@ class Stack(Spectra):
             )
             fig.write_html(fname)
 
+    def plot_spectra(self, fname_root, spectra='all'):
+        print('Plotting spectra...')
+        if not os.path.exists(fname_root):
+            os.makedirs(fname_root)
+        if spectra == 'all':
+            for item in tqdm.tqdm(self):
+                self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum.html'),
+                                normalized=self.normalized)
+        else:
+            slist = [self[s] for s in spectra]
+            for item in tqdm.tqdm(slist):
+                item.plot(fname=os.path.join(fname_root, item.name.replace(' ', '_')+'.spectrum.html'),
+                          normalized=self.normalized)
+
     def save_json(self, filepath):
         with open(filepath, 'w') as handle:
             serializable = copy.deepcopy(self)
@@ -754,3 +790,11 @@ class Stack(Spectra):
             serializable = serializable.__dict__
             serialized = json.dumps(serializable, indent=4)
             handle.write(serialized)
+
+    def __repr__(self):
+        s = f"A collection of {len(self)} stacked spectra.\n"
+        s += f"Corrected:  \t {self.corrected}\n"
+        s += f"Resampled:  \t {self.resampled}\n"
+        s += f"Normalized: \t {self.normalized}\n"
+        s += f"Stacked:    \t {True if type(self.stacked_flux) is np.ndarray else False}\n"
+        return s

@@ -13,8 +13,8 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name="bifr\u00f6st",
-    version="0.0.1",
+    name="bifrost",
+    version="0.0.3",
     author="Michael Reefe",
     author_email="michael.reefe8@gmail.com",
     description="Correct, normalize, coadd, and stack spectra together.",

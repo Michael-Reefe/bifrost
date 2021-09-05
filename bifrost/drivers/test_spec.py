@@ -1,21 +1,29 @@
 from bifrost import spectrum, utils
-import glob
 import os
-import time
 import tqdm
+from joblib import Parallel, delayed
 
-bifrost_path = '/Users/mreefe/Library/Mobile Documents/com~apple~CloudDocs/Astrophysics/bifrost/'
+subdir = 'data.stacked.26000' + os.sep
+
+bifrost_path = os.path.abspath(os.path.join(os.path.abspath(os.path.dirname(__file__)), '..', '..')) + os.sep
 all_spectra = utils.get_filepaths_from_parent(bifrost_path+'data/', 'fits')
-all_spectra = all_spectra[0:100]
-
-print('Loading in spectra...this may take a while.')
+# all_spectra = all_spectra[0:1000]
 stack = spectrum.Stack()
-for path in tqdm.tqdm(all_spectra):
-    ispec = spectrum.Spectrum.from_fits(path, name=path.split(os.sep)[-2])
-    stack.add_spec(ispec)
 
-stack()
-stack.plot_spectra(bifrost_path+'data.stacked.100/', spectra=[0, 1, 2, 3, 4])
-stack.plot_stacked(bifrost_path+'data.stacked.100/stacked_plot.html')
-stack.save_pickle(bifrost_path+'data.stacked.100/stacked_data.pkl')
-stack.save_json(bifrost_path+'data.stacked.100/stacked_data.json')
+
+def make_spec(filepath):
+    ispec = spectrum.Spectrum.from_fits(filepath, name=filepath.split(os.sep)[-2])
+    return ispec
+
+
+if __name__ == '__main__':
+    print('Loading in spectra...')
+    specs = Parallel(n_jobs=-1)(delayed(make_spec)(fpath) for fpath in tqdm.tqdm(all_spectra))
+    for ispec in specs:
+        stack.add_spec(ispec)
+
+    stack()
+    stack.plot_spectra(bifrost_path+subdir, spectra=[0, 1, 2, 3, 4, -1, -2, -3, -4, -5])
+    stack.plot_stacked(bifrost_path+subdir+'stacked_plot.html')
+    stack.save_pickle(bifrost_path+subdir+'stacked_data.pkl')
+    stack.save_json(bifrost_path+subdir+'stacked_data.json')

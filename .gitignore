@@ -1,5 +1,6 @@
-data/
-data.stacked*/
+data*/
+build/
+*.egg-info/
 spectra/
 .idea/**
 **/__pycache__/
