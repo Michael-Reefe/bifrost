@@ -1,5 +1,6 @@
 import argparse
 import sys
+from typing import Union
 
 from bifrost.driver import driver, plotter
 
@@ -43,14 +44,14 @@ def main():
     run_driver.add_argument('--out-path', '-o', metavar='PATH', help='Save path for outputs.', dest='out_path')
     run_driver.add_argument('--n-jobs', '-n', metavar='N', type=int, dest='n_jobs', default=-1,
                             help='Number of jobs to run in parallel when reading fits files.')
-    run_driver.add_argument('--no-save-pickle', '-np', action='store_false', dest='pickle',
+    run_driver.add_argument('--no-save-pickle', '-k', action='store_false', dest='pickle',
                             help='Use this option if you do not want to save a pickle file of the '
                                  'stack object.')
-    run_driver.add_argument('--save-json', '-js', action='store_true', dest='json',
+    run_driver.add_argument('--save-json', '-j', action='store_true', dest='json',
                             help='Use this option if you want to save a json file of the stack object.')
-    run_driver.add_argument('--pyplot', '-pp', action='store_true', dest='use_pyplot',
+    run_driver.add_argument('--pyplot', '-p', action='store_true', dest='use_pyplot',
                             help='Use this option to plot with the pyplot module instead of plotly.')
-    run_driver.add_argument('--plot-spec', '-ps', metavar='N', type=int, nargs='+', dest='plot_spec', default=None,
+    run_driver.add_argument('--plot-spec', '-s', metavar='N', type=int, nargs='+', dest='plot_spec', default=None,
                             help='Specify the indices of which spectra to plot individually.')
     run_driver.add_argument('--limit', '-l', metavar='A B', type=int, nargs=2, dest='limit', default=None,
                             help='Limit to only use the data between A and B indices.')
@@ -60,9 +61,9 @@ def main():
     plot_driver = subparsers.add_parser('plot', help='Replot a stacked spectrum from a saved object')
     plot_driver.add_argument('stack_path', help='Path to a stack pickle or json file.')
     plot_driver.add_argument('--out-path', '-o', metavar='PATH', help='Save path for outputs.', dest='out_path', default=None)
-    plot_driver.add_argument('--pyplot', '-pp', action='store_true', dest='use_pyplot',
+    plot_driver.add_argument('--pyplot', '-p', action='store_true', dest='use_pyplot',
                              help='Use this option to plot with the pyplot module insteaad of plotly.')
-    plot_driver.add_argument('--plot-spec', '-ps', metavar='N', type=int, nargs='+', dest='plot_spec', default=None,
+    plot_driver.add_argument('--plot-spec', '-s', metavar='N', nargs='+', dest='plot_spec', default=None,
                              help='Specify the indices of which spectra to plot individually instead of plotting the stack.')
     plot_driver.set_defaults(func=plot_run)
 

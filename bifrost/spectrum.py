@@ -555,7 +555,7 @@ class Spectra(dict):
         format = '.html' if backend == 'plotly' else '.pdf'
         if not os.path.exists(fname_root):
             os.makedirs(fname_root)
-        if spectra == 'all':
+        if spectra == 'all' or spectra == ['all']:
             for item in tqdm.tqdm(self):
                 self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum'+format),
                                 backend=backend)
@@ -929,7 +929,7 @@ class Stack(Spectra):
         format = '.html' if backend == 'plotly' else '.pdf'
         if not os.path.exists(fname_root):
             os.makedirs(fname_root)
-        if spectra == 'all':
+        if spectra == 'all' or spectra == ['all']:
             for item in tqdm.tqdm(self):
                 self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum'+format),
                                 normalized=self.normalized, backend=backend)

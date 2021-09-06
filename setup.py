@@ -14,7 +14,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="bifrost",
-    version="0.0.5",
+    version="0.0.6",
     author="Michael Reefe",
     author_email="michael.reefe8@gmail.com",
     description="Correct, normalize, coadd, and stack spectra together.",
