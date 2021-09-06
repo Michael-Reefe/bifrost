@@ -3,7 +3,7 @@ import os
 import tqdm
 from joblib import Parallel, delayed
 
-subdir = 'data.stacked.26000' + os.sep
+subdir = 'data.stacked.2600' + os.sep
 
 bifrost_path = os.path.abspath(os.path.join(os.path.abspath(os.path.dirname(__file__)), '..', '..')) + os.sep
 all_spectra = utils.get_filepaths_from_parent(bifrost_path+'data/', 'fits')

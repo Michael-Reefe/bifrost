@@ -8,3 +8,4 @@ spectra/
 *.pkl
 *.pdf
 *.json
+filters.py

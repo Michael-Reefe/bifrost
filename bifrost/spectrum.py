@@ -424,17 +424,17 @@ class Spectrum:
             except:
                 ra = specobj['PLUG_RA'][0]
                 dec = specobj['PLUG_DEC'][0]
+
             t = hdu[1].data
+
+            # Unpack the spectra
+            flux = t['flux']
+            wave = np.power(10, t['loglam'])
+            error = np.sqrt(1 / t['ivar'])
+            # and_mask = t['and_mask']
 
         hdu.close()
         del hdu
-
-        # Unpack the spectra
-        flux = t['flux']
-        wave = np.power(10, t['loglam'])
-        error = np.sqrt(1/t['ivar'])
-        and_mask = t['and_mask']
-
         del t
         del specobj
         gc.collect()
@@ -654,7 +654,7 @@ class Stack(Spectra):
             'r_v': 3.1,                # Extinction ratio A(V)/E(B-V) to calculate for
             'gridspace': 1,            # Spacing of the wavelength grid
             'tolerance': 500,          # Tolerance for throwing out spectra that are > tolerance angstroms apart from others
-            'norm_region': None        # Wavelength bounds to use for the normalization region, with no prominent lines
+            'norm_region': None,       # Wavelength bounds to use for the normalization region, with no prominent lines
         }
         # Edit the blueprints dictionary with any user-specified options
         for option in options:
@@ -728,7 +728,7 @@ class Stack(Spectra):
     def correct_spectra(self):
         """
         Spectra.correct_spectra method now using the instance attribute self.r_v as the argument
-        
+
         :return None:
         """
         print('Correcting spectra to rest-frame wavelengths and adjusting for galactic extinction...')
@@ -896,10 +896,11 @@ class Stack(Spectra):
                 fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#663399')
             for line in abslines:
                 fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#d1c779')
+            title = 'Stacked Spectra'
             fig.update_layout(
                 yaxis_title='f<sub>&#955;</sub> (normalized)',
                 xaxis_title='&#955;<sub>rest</sub> (&#8491;)',
-                title='Stacked Spectra',
+                title=title,
                 hovermode='x'
             )
             fig.update_xaxes(
