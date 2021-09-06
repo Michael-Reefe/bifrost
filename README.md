@@ -1,22 +1,21 @@
-<h1>BIFR&#xd6;ST</h1>
-<h2>Black hole Investigations For energetic Radiation On Spectra via STacking</h2>
+# BIFR&#xd6;ST
+## Black hole Investigations For energetic Radiation On Spectra via STacking
 
 This code aims to bridge the gap between stellar mass black holes and supermassive
 black holes, just as the burning rainbow bridge it is named after bridges the gap
 between Asgard and Midgard, by providing a means of searching for them via a
 spectral stacking framework.
 
-<h3>Installation</h3>
-After cloning the repository, you can install locally via pip: <code>pip install .</code>
-Or alternatively, <code>python setup.py install</code>.
+### Installation
+After cloning the repository, you can install locally via pip: ` pip install . `
+Or alternatively, ` python setup.py install `.
 
-It may be necessary to increase the open file limit with `ulimit -n XXXX`, depending
+It may be necessary to increase the open file limit with ` ulimit -n XXXX `, depending
 on how many spectra you are stacking at once.
 
-<h3>CLI</h3>
+### CLI
 The code can be run via the command-line interface.  The syntax for stacking spectra is:
-<pre>
-<code>
+``` 
 usage: bifrost stack [-h] [--out-path PATH] [--n-jobs N] [--no-save-pickle] [--save-json] [--pyplot] [--plot-spec N [N ...]]
                      data_path
 
@@ -34,5 +33,4 @@ optional arguments:
   --pyplot, -pp         Use this option to plot with the pyplot module instead of plotly.
   --plot-spec N [N ...], -ps N [N ...]
                         Specify the indices of which spectra to plot individually.
-</code>
-</pre>
+``` 
