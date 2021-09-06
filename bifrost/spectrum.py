@@ -648,28 +648,32 @@ class Spectra(dict):
 
 class Stack(Spectra):
 
-    def __init__(self, **options):
+    def __init__(self, universal_grid=None, stacked_flux=None, stacked_err=None, resampled=False, normalized=False,
+                 **options):
         """
         An extension of the Spectra class (and by extension, the dictionary) specifically for stacking purposes.
 
         """
-        blueprints = {
-            'r_v': 3.1,                # Extinction ratio A(V)/E(B-V) to calculate for
-            'gridspace': 1,            # Spacing of the wavelength grid
-            'tolerance': 500,          # Tolerance for throwing out spectra that are > tolerance angstroms apart from others
-            'norm_region': None,       # Wavelength bounds to use for the normalization region, with no prominent lines
-        }
+        # Load in the blueprints dictionary from config.json
+        config_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'config.json')
+        blueprints = json.load(open(config_path, 'r'))
+        """
+        r_v:          Extinction ratio A(V)/E(B-V) to calculate for.  Default = 3.1
+        gridspace:    Spacing of the wavelength grid.  Default = 1
+        tolerance:    Tolerance for throwing out spectra that are > tolerance angstroms apart from others.  Default = 500
+        norm_region:  Wavelength bounds to use for the normalization region, with no prominent lines.  Default = None
+        """
         # Edit the blueprints dictionary with any user-specified options
         for option in options:
             blueprints[option] = options[option]
         # Update the object using the blueprints dictionary
         self.__dict__.update(**blueprints)
         # Default object properties that will be filled in later
-        self.universal_grid = None
-        self.stacked_flux = None
-        self.stacked_err = None
-        self.resampled = False
-        self.normalized = False
+        self.universal_grid = universal_grid
+        self.stacked_flux = stacked_flux
+        self.stacked_err = stacked_err
+        self.resampled = resampled
+        self.normalized = normalized
         super().__init__()
 
     def calc_norm_region(self):

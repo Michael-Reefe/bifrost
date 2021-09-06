@@ -8,6 +8,5 @@ spectra/
 
 *.pkl
 *.pdf
-*.json
 *.DS_Store
 filters.py

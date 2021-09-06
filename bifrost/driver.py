@@ -1,7 +1,12 @@
-from bifrost import spectrum, utils
 import os
+import pickle
+import json
+
+import numpy as np
 import tqdm
 from joblib import Parallel, delayed
+
+from bifrost import spectrum, utils
 
 
 def driver(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=False, plot_backend='plotly',
@@ -60,3 +65,48 @@ def driver(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=Fals
         stack.save_json(out_path+'stacked_data.json')
 
     return stack
+
+
+def plotter(stack_path, out_path=None, plot_backend='plotly', plot_spec=None):
+    """
+    Replot the stacked spectra.
+
+    :param stack_path: str
+        Path to a pickle or json file containing the stack object.
+    :param out_path: str
+        Folder / file name to save the new files to.
+    :param plot_backend: str
+        May be 'pyplot' to use pyplot or 'plotly' to use plotly for plotting.  Default is 'plotly'.
+    :param plot_spec: str, iterable
+        Spectra to plot individually
+    :return None:
+    """
+    format = stack_path.split('.')[-1]
+    plot_format = '.html' if plot_backend == 'plotly' else '.pdf'
+    if not out_path:
+        out_path = os.path.dirname(stack_path)
+    if format == 'json':
+        def json_stack_hook(_dict):
+            options = dict(
+                r_v=_dict['r_v'],
+                gridspace=_dict['gridspace'],
+                tolerance=_dict['tolerance'],
+                norm_region=_dict['norm_region'],
+            )
+            return spectrum.Stack(universal_grid=np.array(_dict['universal_grid']), stacked_flux=np.array(_dict['stacked_flux']),
+                                  stacked_err=np.array(_dict['stacked_err']), resampled=_dict['resampled'], normalized=_dict['normalized'],
+                                  **options)
+
+        stack = json.load(open(stack_path, 'r'), object_hook=json_stack_hook)
+    elif format == 'pkl':
+        stack = pickle.load(open(stack_path, 'rb'))
+    else:
+        raise ValueError(f"Cannot read object file type: {format}")
+
+    if not plot_spec:
+        stack.plot_stacked(os.path.join(out_path, 'stacked_plot'+plot_format), backend=plot_backend)
+    else:
+        if format == 'json':
+            raise AttributeError("Cannot read individual spectra from a saved json file, only the stacked data "
+                                 "is saved.")
+        stack.plot_spectra(out_path, spectra=plot_spec, backend=plot_backend)
