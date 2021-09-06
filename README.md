@@ -7,15 +7,16 @@ between Asgard and Midgard, by providing a means of searching for them via a
 spectral stacking framework.
 
 <h3>Installation</h3>
-After cloning the repository, you can install locally via pip: `pip install .`
-Or alternatively, `python setup.py install`.
+After cloning the repository, you can install locally via pip: <code>pip install .</code>
+Or alternatively, <code>python setup.py install</code>.
 
 It may be necessary to increase the open file limit with `ulimit -n XXXX`, depending
 on how many spectra you are stacking at once.
 
 <h3>CLI</h3>
 The code can be run via the command-line interface.  The syntax for stacking spectra is:
-```
+<pre>
+<code>
 usage: bifrost stack [-h] [--out-path PATH] [--n-jobs N] [--no-save-pickle] [--save-json] [--pyplot] [--plot-spec N [N ...]]
                      data_path
 
@@ -33,5 +34,5 @@ optional arguments:
   --pyplot, -pp         Use this option to plot with the pyplot module instead of plotly.
   --plot-spec N [N ...], -ps N [N ...]
                         Specify the indices of which spectra to plot individually.
-```
-
+</code>
+</pre>
