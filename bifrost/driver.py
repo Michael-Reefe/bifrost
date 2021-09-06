@@ -41,7 +41,7 @@ def driver(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=Fals
     stack = spectrum.Stack()
 
     def make_spec(filepath):
-        ispec = spectrum.Spectrum.from_fits(filepath, name=filepath.split(os.sep)[-2])
+        ispec = spectrum.Spectrum.from_fits(filepath, name=filepath.split(os.sep)[-1])
         return ispec
 
     print('Loading in spectra...')
