@@ -1,6 +1,7 @@
 import os
 import glob
 import time
+import datetime
 
 
 def get_filepaths_from_parent(parentdir, ftype):
@@ -16,6 +17,24 @@ def get_filepaths_from_parent(parentdir, ftype):
     files = glob.glob(os.path.join(parentdir, '**', '*.'+ftype), recursive=True)
     files.sort()
     return files
+
+
+def gen_datestr(time=False):
+    """
+    Generate a string of YYYYMMDD[_HHMMSS].
+
+    :param time: bool
+        If true, the HHMMSS portion of the string is included.  Otherwise it is not.
+        Default is false.
+    :return dt_string: str
+        The date/time string.
+    """
+    now = datetime.datetime.now()
+    if time:
+        dt_string = now.strftime("%Y%m%d_%H%M%S")
+    else:
+        dt_string = now.strftime("%Y%m%d")
+    return dt_string
 
 
 # Make a wrapper to time each call of a function

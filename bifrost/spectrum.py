@@ -541,7 +541,7 @@ class Spectra(dict):
             for item, r_vi in zip(self, r_v):
                 self[item].apply_corrections(r_v=r_vi)
 
-    def plot_spectra(self, fname_root, spectra='all'):
+    def plot_spectra(self, fname_root, spectra='all', backend='plotly'):
         """
         Plot a series of spectra from the dictionary.
 
@@ -552,15 +552,18 @@ class Spectra(dict):
         :return None:
         """
         print('Plotting spectra...')
+        format = '.html' if backend == 'plotly' else '.pdf'
         if not os.path.exists(fname_root):
             os.makedirs(fname_root)
         if spectra == 'all':
             for item in tqdm.tqdm(self):
-                self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum.html'))
+                self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum'+format),
+                                backend=backend)
         else:
             slist = [self[s] for s in spectra]
             for item in tqdm.tqdm(slist):
-                item.plot(fname=os.path.join(fname_root, item.name.replace(' ', '_')+'.spectrum.html'))
+                item.plot(fname=os.path.join(fname_root, item.name.replace(' ', '_')+'.spectrum'+format),
+                          backend=backend)
 
     def get_spec_index(self, name):
         """
@@ -913,23 +916,24 @@ class Stack(Spectra):
             )
             fig.write_html(fname)
 
-    def plot_spectra(self, fname_root, spectra='all'):
+    def plot_spectra(self, fname_root, spectra='all', backend='plotly'):
         """
         Spectra.plot_spectra but incorporates the information from self.normalized.
 
         """
         print('Plotting spectra...')
+        format = '.html' if backend == 'plotly' else '.pdf'
         if not os.path.exists(fname_root):
             os.makedirs(fname_root)
         if spectra == 'all':
             for item in tqdm.tqdm(self):
-                self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum.html'),
-                                normalized=self.normalized)
+                self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum'+format),
+                                normalized=self.normalized, backend=backend)
         else:
             slist = [self[s] for s in spectra]
             for item in tqdm.tqdm(slist):
-                item.plot(fname=os.path.join(fname_root, item.name.replace(' ', '_')+'.spectrum.html'),
-                          normalized=self.normalized)
+                item.plot(fname=os.path.join(fname_root, item.name.replace(' ', '_')+'.spectrum'+format),
+                          normalized=self.normalized, backend=backend)
 
     def save_json(self, filepath):
         """
