@@ -1,8 +1,8 @@
 import argparse
 import sys
-from typing import Union
+import copy
 
-from bifrost.driver import driver, plotter
+from bifrost.driver import *
 
 
 def cli_run(args):
@@ -27,6 +27,26 @@ def plot_run(args):
     """
     backend = 'pyplot' if args.use_pyplot else 'plotly'
     plotter(args.stack_path, out_path=args.out_path, plot_backend=backend, plot_spec=args.plot_spec)
+
+
+def config_run(args):
+    """
+    Passes in the CLI arguments to the edit_config function in driver.
+
+    :param args: parser.parse_args
+        Arguments passed in from the command line
+    :return None:
+    """
+    # Remove any arguments that are None, so they wont be changed
+    args = args.__dict__
+    reset = args['norm_reset']
+    for arg in copy.deepcopy(args):
+        if (args[arg] is None) or arg in ('func', 'norm_reset'):
+            del args[arg]
+    if reset:
+        args['norm_region'] = None
+
+    edit_config(**args)
 
 
 def main():
@@ -66,6 +86,19 @@ def main():
     plot_driver.add_argument('--plot-spec', '-s', metavar='N', nargs='+', dest='plot_spec', default=None,
                              help='Specify the indices of which spectra to plot individually instead of plotting the stack.')
     plot_driver.set_defaults(func=plot_run)
+
+    # Edit config command
+    config_driver = subparsers.add_parser('config', help='Edit default configurations for stacks.')
+    config_driver.add_argument('-r_v', metavar='F', type=float, help='Extinction ratio A(V)/E(B-V) to calculate for.', dest='r_v', default=None)
+    config_driver.add_argument('-gridspace', metavar='F', type=float, help='Spacing of the wavelength grid.', dest='gridspace',
+                               default=None)
+    config_driver.add_argument('-tolerance', metavar='F', type=float, help='Tolerance for throwing out spectra that are > tolerance angstroms apart from others.',
+                               dest='tolerance', default=None)
+    config_driver.add_argument('-norm-region', metavar='F', nargs=2, help='Wavelength bounds to use for the normalization region, with no prominent lines.',
+                               dest='norm_region', default=None)
+    config_driver.add_argument('--reset-norm-region', action='store_true', dest='norm_reset',
+                               help='Reset the normalization region to None, which automatically calculates the ideal region.')
+    config_driver.set_defaults(func=config_run)
 
     args = parser.parse_args()
     args.func(args)

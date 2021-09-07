@@ -110,3 +110,33 @@ def plotter(stack_path, out_path=None, plot_backend='plotly', plot_spec=None):
             raise AttributeError("Cannot read individual spectra from a saved json file, only the stacked data "
                                  "is saved.")
         stack.plot_spectra(out_path, spectra=plot_spec, backend=plot_backend)
+
+
+def edit_config(**options):
+    """
+    Edit the default configuration options for the Stack object.
+    :param options: dict
+        Keyword arguments corresponding to each option
+    :return None:
+    """
+    # Load in the current config file
+    config_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'config.json')
+    blueprints = json.load(open(config_path, 'r'))
+
+    # Edit the options based on arguments
+    for option in options:
+        value = options[option]
+        if option == 'r_v':
+            assert value >= 0, "r_v must be positive!"
+        elif option == 'gridspace':
+            assert value > 0, "gridspace must be nonzero!"
+        elif option == 'tolerance':
+            assert value > 0, "tolerance must be nonzero!"
+        elif option == 'norm_region' and value is not None:
+            assert value[0] < value[1], "right bound must be larger than left bound!"
+        blueprints[option] = value
+
+    # Rewrite the config file with the new options
+    serialized = json.dumps(blueprints, indent=4)
+    with open(config_path, 'w') as handle:
+        handle.write(serialized)
