@@ -6,11 +6,11 @@ import numpy as np
 import tqdm
 from joblib import Parallel, delayed
 
-from bifrost import spectrum, utils
+from bifrost import spectrum, utils, filters
 
 
 def driver(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=False, plot_backend='plotly',
-         plot_spec=None, limits=None):
+         plot_spec=None, limits=None, _filters=None):
     """
     The main driver for the stacking code.
 
@@ -31,19 +31,32 @@ def driver(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=Fals
         Which spectra to plot individually.  Default is None, which doesn't plot any.
     :param limits: tuple
         Limit to only use data in the range of these indices.
+    :param _filters: str, iterable
+        Filter objects to be applied to the Stack.
     :return stack: Stack
         The Stack object.
     """
+    # Create output paths
     if not out_path:
         out_path = 'data.stacked.' + utils.gen_datestr(True)
     if not os.path.exists(out_path):
         os.makedirs(out_path)
     out_path += os.sep
 
+    # Gather spectra paths
     all_spectra = utils.get_filepaths_from_parent(data_path, 'fits')
     if limits:
         all_spectra = all_spectra[limits[0]:limits[1]]
-    stack = spectrum.Stack()
+
+    # Configure filter objects
+    filter_list = []
+    if not _filters:
+        _filters = []
+    if type(_filters) is str:
+        _filters = [_filters]
+    for _filter in _filters:
+        filter_list.append(filters.Filter.from_str(_filter))
+    stack = spectrum.Stack(filters=filter_list)
 
     def make_spec(filepath):
         ispec = spectrum.Spectrum.from_fits(filepath, name=filepath.split(os.sep)[-1])
@@ -92,10 +105,12 @@ def plotter(stack_path, out_path=None, plot_backend='plotly', plot_spec=None):
                 gridspace=_dict['gridspace'],
                 tolerance=_dict['tolerance'],
                 norm_region=_dict['norm_region'],
+                default_filters=_dict['default_filters']
             )
+            fs = [filters.Filter.from_str(ff) for ff in _dict['filters']]
             return spectrum.Stack(universal_grid=np.array(_dict['universal_grid']), stacked_flux=np.array(_dict['stacked_flux']),
                                   stacked_err=np.array(_dict['stacked_err']), resampled=_dict['resampled'], normalized=_dict['normalized'],
-                                  **options)
+                                  filters=fs, **options)
 
         stack = json.load(open(stack_path, 'r'), object_hook=json_stack_hook)
     elif format == 'pkl':

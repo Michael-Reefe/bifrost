@@ -15,7 +15,7 @@ def cli_run(args):
     """
     backend = 'pyplot' if args.use_pyplot else 'plotly'
     driver(args.data_path, out_path=args.out_path, n_jobs=args.n_jobs, save_pickle=args.pickle, save_json=args.json,
-           plot_backend=backend, plot_spec=args.plot_spec, limits=args.limit)
+           plot_backend=backend, plot_spec=args.plot_spec, limits=args.limit, _filters=args.filters)
 
 
 def plot_run(args):
@@ -73,8 +73,10 @@ def main():
                             help='Use this option to plot with the pyplot module instead of plotly.')
     run_driver.add_argument('--plot-spec', '-s', metavar='N', type=int, nargs='+', dest='plot_spec', default=None,
                             help='Specify the indices of which spectra to plot individually.')
-    run_driver.add_argument('--limit', '-l', metavar='A B', type=int, nargs=2, dest='limit', default=None,
-                            help='Limit to only use the data between A and B indices.')
+    run_driver.add_argument('--limit', '-l', metavar='N', type=int, nargs=2, dest='limit', default=None,
+                            help='Limit to only use the data between 2 indices.')
+    run_driver.add_argument('--filters', '-f', metavar='STR', type=str, nargs='+', dest='filters', default=None,
+                            help='Add filters to the spectra used in the stack.')
     run_driver.set_defaults(func=cli_run)
 
     # Replotting command

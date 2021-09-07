@@ -26,6 +26,7 @@ import spectres
 
 # Bifrost packages
 import bifrost.utils as utils
+import bifrost.filters as bfilters
 
 
 class Spectrum:
@@ -649,7 +650,7 @@ class Spectra(dict):
 class Stack(Spectra):
 
     def __init__(self, universal_grid=None, stacked_flux=None, stacked_err=None, resampled=False, normalized=False,
-                 **options):
+                 filters=None, **options):
         """
         An extension of the Spectra class (and by extension, the dictionary) specifically for stacking purposes.
 
@@ -658,16 +659,25 @@ class Stack(Spectra):
         config_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'config.json')
         blueprints = json.load(open(config_path, 'r'))
         """
-        r_v:          Extinction ratio A(V)/E(B-V) to calculate for.  Default = 3.1
-        gridspace:    Spacing of the wavelength grid.  Default = 1
-        tolerance:    Tolerance for throwing out spectra that are > tolerance angstroms apart from others.  Default = 500
-        norm_region:  Wavelength bounds to use for the normalization region, with no prominent lines.  Default = None
+        r_v:              Extinction ratio A(V)/E(B-V) to calculate for.  Default = 3.1
+        gridspace:        Spacing of the wavelength grid.  Default = 1
+        tolerance:        Tolerance for throwing out spectra that are > tolerance angstroms apart from others.  Default = 500
+        norm_region:      Wavelength bounds to use for the normalization region, with no prominent lines.  Default = None
+        default_filters:  Default filters to apply to all runs.  Default = []
         """
         # Edit the blueprints dictionary with any user-specified options
         for option in options:
+            if option not in blueprints:
+                raise ValueError(f"The {option} key is not recognized as a configuration parameter!")
             blueprints[option] = options[option]
         # Update the object using the blueprints dictionary
         self.__dict__.update(**blueprints)
+        # Filters
+        if filters is None:
+            filters = []
+        for f in self.default_filters:
+            filters.append(bfilters.Filter.from_str(f))
+        self.filters = filters
         # Default object properties that will be filled in later
         self.universal_grid = universal_grid
         self.stacked_flux = stacked_flux
@@ -702,6 +712,26 @@ class Stack(Spectra):
                 diffs[imax] = np.nan
         raise ValueError("A normalization region could not be found!")
 
+    def filter_spectra(self):
+        """
+        Go through each filter and decide if each spectrum fits its criteria. If not, the specttrum is masked out.
+
+        :return None:
+        """
+        aliases = {'z': 'redshift'}
+        for filter in self.filters:
+            if filter.attribute in aliases:
+                att = aliases[filter.attribute]
+            else:
+                att = filter.attribute
+            removals = []
+            for ispec in self:
+                if not (filter.lower_bound < getattr(self[ispec], att) < filter.upper_bound):
+                    print(f"WARNING: Removing spectrum {self.get_spec_index(ispec)+1}: {ispec} since it does not fulfill the criteria: {filter}")
+                    removals.append(ispec)
+            for r in removals:
+                del self[r]
+
     # Allow the class to be called as a way to perform the stacking
     @utils.timer(name='Stack Procedure')
     def __call__(self):
@@ -723,6 +753,7 @@ class Stack(Spectra):
             The co-added error.
         """
         self.correct_spectra()
+        self.filter_spectra()
         if type(self.universal_grid) is not np.ndarray:
             self.uniform_wave_grid()
         if not self.resampled:
@@ -952,6 +983,7 @@ class Stack(Spectra):
             serializable.universal_grid = serializable.universal_grid.tolist()
             serializable.stacked_flux = serializable.stacked_flux.tolist()
             serializable.stacked_err = serializable.stacked_err.tolist()
+            serializable.filters = [str(f) for f in serializable.filters]
             serializable = serializable.__dict__
             serialized = json.dumps(serializable, indent=4)
             handle.write(serialized)

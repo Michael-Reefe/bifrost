@@ -2,5 +2,6 @@
   "r_v": 3.1,
   "gridspace": 1.0,
   "tolerance": 500.0,
-  "norm_region": null
+  "norm_region": null,
+  "default_filters": []
 }
