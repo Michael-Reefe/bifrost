@@ -9,6 +9,7 @@ import gc
 # External packages
 import tqdm
 import numpy as np
+import pandas as pd
 from numba import jit, njit, prange
 import matplotlib.pyplot as plt
 import plotly.subplots
@@ -22,7 +23,7 @@ import astropy.constants as c
 import astropy.convolution
 
 import astroquery.irsa_dust
-import spectres
+# import spectres
 
 # Bifrost packages
 import bifrost.utils as utils
@@ -31,9 +32,9 @@ import bifrost.filters as bfilters
 
 class Spectrum:
 
-    __slots__ = ['wave', 'flux', 'error', 'redshift', 'ebv', 'name', 'output_path', '_corrected']
+    __slots__ = ['wave', 'flux', 'error', 'redshift', 'ebv', 'name', 'output_path', '_corrected', 'data']
 
-    def __init__(self, wave, flux, error, redshift=None, ebv=None, name='Generic', output_path=None):
+    def __init__(self, wave, flux, error, redshift=None, ebv=None, name='Generic', output_path=None, **data):
         """
         A class containing data and attributes for a single spectrum of an astronomical object.
 
@@ -55,6 +56,8 @@ class Spectrum:
             If none is provided, it is assumed the given flux is already corrected for galactic extinction.
         :param name: str
             An identifier for the object spectrum.
+        :param data: dict
+            Any other parameters that might want to be sorted by.
         :param output_path: str
             A directory where saved files will default to if none is given.
         """
@@ -77,6 +80,9 @@ class Spectrum:
         # Verify that everything makes sense
         self._verify()
         self._corrected = False
+
+        # Other properties that might want to be sorted by
+        self.data = data
 
     def __repr__(self):
         s = '########################################################################################\n'
@@ -108,9 +114,9 @@ class Spectrum:
         """
         if not self._corrected:
             if self.redshift:
-                self.wave = self.calc_rest_frame(self.wave, self.redshift)
+                self.wave = utils.calc_rest_frame(self.wave, self.redshift)
             if self.ebv:
-                self.flux = self.correct_extinction(self.wave, self.flux, self.ebv, r_v)
+                self.flux = utils.correct_extinction(self.wave, self.flux, self.ebv, r_v)
             self._corrected = True
 
     @property
@@ -124,156 +130,6 @@ class Spectrum:
     @corrected.deleter
     def corrected(self):
         raise ValueError("The 'corrected' property may not be deleted!")
-
-    @staticmethod
-    @njit
-    def calc_rest_frame(wave, redshift):
-        """
-        Calculate the rest frame wavelengths of the object from the redshift.
-
-        :param wave: np.ndarray
-            The wavelength array
-        :param redshift: float
-            The redshift of the object
-        :return wave: np.ndarray
-            The redshift-corrected wavelength array.
-        """
-        wave /= (1+redshift)
-        return wave
-
-    @staticmethod
-    def correct_extinction(wave, flux, ebv, r_v):
-        """
-        Deredden a flux vector using the CCM 1989 parameterization
-        Returns an array of the unreddened flux
-
-        :param wave: np.ndarray
-            The wavelength vector.
-        :param flux: np.ndarray
-            The flux vector to be corrected.
-        :param ebv: float
-            E(B-V) in magintudes.
-        :param r_v: optional, float
-            specifies the ratio of total selective
-            extinction R(V) = A(V)/E(B-V). If not specified,
-            then r_v = 3.1
-        :return flux: np.ndarray
-            The unreddened calibrated flux array, same number of
-            elements as wave
-
-        NOTES:
-        0. This function was taken from BADASS3, created by Remington Sexton, https://github.com/remingtonsexton/BADASS3.
-           All notes below come from the original BADASS documentation.
-
-        1. (From BADASS:) This function was converted from the IDL Astrolib procedure
-           last updated in April 1998. All notes from that function
-           (provided below) are relevant to this function
-
-        2. (From IDL:) The CCM curve shows good agreement with the Savage & Mathis (1979)
-           ultraviolet curve shortward of 1400 A, but is probably
-           preferable between 1200 and 1400 A.
-        3. (From IDL:) Many sightlines with peculiar ultraviolet interstellar extinction
-           can be represented with a CCM curve, if the proper value of
-           R(V) is supplied.
-        4. (From IDL:) Curve is extrapolated between 912 and 1000 A as suggested by
-           Longo et al. (1989, ApJ, 339,474)
-        5. (From IDL:) Use the 4 parameter calling sequence if you wish to save the
-           original flux vector.
-        6. (From IDL:) Valencic et al. (2004, ApJ, 616, 912) revise the ultraviolet CCM
-           curve (3.3 -- 8.0 um-1).	But since their revised curve does
-           not connect smoothly with longer and shorter wavelengths, it is
-           not included here.
-
-        7. For the optical/NIR transformation, the coefficients from
-           O'Donnell (1994) are used
-
-        # >>> ccm_unred([1000, 2000, 3000], [1, 1, 1], 2 )
-        array([9.7976e+012, 1.12064e+07, 32287.1])
-        """
-        assert wave.size == flux.size, "Wave and flux must have the same size!"
-
-        x = 10000.0 / wave
-        npts = wave.size
-        a = np.zeros(npts)
-        b = np.zeros(npts)
-
-        ###############################
-        # Infrared
-
-        good = np.where((x > 0.3) & (x < 1.1))[0]
-        a[good] = 0.574 * x[good] ** (1.61)
-        b[good] = -0.527 * x[good] ** (1.61)
-
-        ###############################
-        # Optical & Near IR
-
-        good = np.where((x >= 1.1) & (x < 3.3))[0]
-        y = x[good] - 1.82
-
-        c1 = np.array([1.0, 0.104, -0.609, 0.701, 1.137, -1.718, -0.827, 1.647, -0.505])
-        c2 = np.array([0.0, 1.952, 2.908, -3.989, -7.985, 11.102, 5.491, -10.805, 3.347])
-
-        # order = len(c1)
-        # poly_a = np.zeros(len(y))
-        # for i in prange(order):
-        #     poly_a += c1[::-1][i] * y ** (order-1-i)
-        # a[good] = poly_a
-        #
-        # order = len(c2)
-        # poly_b = np.zeros(len(y))
-        # for j in prange(order):
-        #     poly_b += c2[::-1][j] * y ** (order-1-j)
-        # b[good] = poly_b
-        a[good] = np.polyval(c1[::-1], y)
-        b[good] = np.polyval(c2[::-1], y)
-
-        ###############################
-        # Mid-UV
-
-        good = np.where((x >= 3.3) & (x < 8))[0]
-        y = x[good]
-        F_a = np.zeros(good.size)
-        F_b = np.zeros(good.size)
-        good1 = np.where(y > 5.9)[0]
-
-        if good1.size > 0:
-            y1 = y[good1] - 5.9
-            F_a[good1] = -0.04473 * y1 ** 2 - 0.009779 * y1 ** 3
-            F_b[good1] = 0.2130 * y1 ** 2 + 0.1207 * y1 ** 3
-
-        a[good] = 1.752 - 0.316 * y - (0.104 / ((y - 4.67) ** 2 + 0.341)) + F_a
-        b[good] = -3.090 + 1.825 * y + (1.206 / ((y - 4.62) ** 2 + 0.263)) + F_b
-
-        ###############################
-        # Far-UV
-
-        good = np.where((x >= 8) & (x <= 11))[0]
-        y = x[good] - 8.0
-        c1 = [-1.073, -0.628, 0.137, -0.070]
-        c2 = [13.670, 4.257, -0.420, 0.374]
-
-        # order = len(c1)
-        # poly_a = np.zeros(len(y))
-        # for i in prange(order):
-        #     poly_a += c1[::-1][i] * y ** (order-1-i)
-        # a[good] = poly_a
-        #
-        # order = len(c2)
-        # poly_b = np.zeros(len(y))
-        # for j in prange(order):
-        #     poly_b += c2[::-1][j] * y ** (order-1-j)
-        # b[good] = poly_b
-        a[good] = np.polyval(c1[::-1], y)
-        b[good] = np.polyval(c2[::-1], y)
-
-        # Applying Extinction Correction
-
-        a_v = r_v * ebv
-        a_lambda = a_v * (a + b / r_v)
-
-        flux = flux * 10.0 ** (0.4 * a_lambda)
-
-        return flux  # ,a_lambda
 
     def plot(self, convolve_width=3, emline_color="rebeccapurple", absorp_color="darkgoldenrod", overwrite=False,
              fname=None, backend='plotly', normalized=False):
@@ -391,7 +247,6 @@ class Spectrum:
             )
             fig.write_html(fname)
 
-
     def save_pickle(self):
         """
         Save the object contents to a pickle file
@@ -402,7 +257,7 @@ class Spectrum:
             pickle.dump(self, handle)
 
     @classmethod
-    def from_fits(cls, filepath, name):
+    def from_fits(cls, filepath, name, save_all_data=False):
         """
         Create a spectrum object from a fits file
         This function was adapted from BADASS3, created by Remington Sexton, https://github.com/remingtonsexton/BADASS3.
@@ -415,6 +270,7 @@ class Spectrum:
             The Spectrum object created from the fits file.
         """
         # Load the data
+        data_dict = {}
         with astropy.io.fits.open(filepath) as hdu:
 
             specobj = hdu[2].data
@@ -433,6 +289,20 @@ class Spectrum:
             wave = np.power(10, t['loglam'])
             error = np.sqrt(1 / t['ivar'])
             # and_mask = t['and_mask']
+
+            if save_all_data:
+                for key in specobj.names:
+                    if key != 'z':
+                        data_dict[key] = specobj[key]
+                for key in hdu[0].header:
+                    if key not in data_dict.keys():
+                        data_dict[key] = hdu[0].header[key]
+                for key in hdu[1].data.names:
+                    if key not in data_dict.keys() and key not in ('flux', 'loglam', 'ivar'):
+                        data_dict[key] = hdu[1].data[key]
+                for key in hdu[3].data.names:
+                    if key not in data_dict.keys():
+                        data_dict[key] = hdu[3].data[key]
 
         hdu.close()
         del hdu
@@ -483,7 +353,7 @@ class Spectrum:
             error.byteswap(inplace=True)
             error.dtype = '<f4'
 
-        return cls(wave, flux, error, redshift=z, ebv=ebv, name=name)
+        return cls(wave, flux, error, redshift=z, ebv=ebv, name=name, **data_dict)
 
 
 class Spectra(dict):
@@ -814,7 +684,7 @@ class Stack(Spectra):
         """
         print('Resampling spectra over a uniform wave grid...')
         for ispec in tqdm.tqdm(self):
-            self[ispec].flux, self[ispec].error = spectres.spectres(self.universal_grid, self[ispec].wave, self[ispec].flux, spec_errs=self[ispec].error, fill=np.nan)
+            self[ispec].flux, self[ispec].error = utils.spectres(self.universal_grid, self[ispec].wave, self[ispec].flux, spec_errs=self[ispec].error, fill=np.nan)
             self[ispec].wave = self.universal_grid
         self.resampled = True
 
@@ -830,10 +700,19 @@ class Stack(Spectra):
         # Use the first spectra's wave since by this point they should all be equal anyways, to calculate the region to fit
         reg = np.where((self.norm_region[0] < self.universal_grid) & (self.universal_grid < self.norm_region[1]))[0]
         for ispec in tqdm.tqdm(self):
+            self[ispec].flux, self[ispec].error = self._norm(self[ispec].flux, self[ispec].error, reg)
             med = np.nanmedian(self[ispec].flux[reg])
             self[ispec].flux /= med
             self[ispec].error /= med
         self.normalized = True
+
+    @staticmethod
+    @njit
+    def _norm(data, error, region):
+        med = np.nanmedian(data[region])
+        data /= med
+        error /= med
+        return data, error
 
     def coadd(self):
         """
@@ -846,16 +725,20 @@ class Stack(Spectra):
 
         print('Coadding spectra...')
         for i in tqdm.trange(len(self.universal_grid)):
-            self.stacked_flux[i] = np.nansum([self[name].flux[i]/self[name].error[i]**2 for name in self]) \
-                                   / np.nansum([1/self[name].error[i]**2 for name in self])
+            flux_i = np.array([self[name].flux[i] for name in self])
+            err_i = np.array([self[name].error[i] for name in self])
+            self.stacked_flux[i], self.stacked_err[i] = self._coadd_flux_err(flux_i, err_i)
 
-        print('Coadding errors...')
-        for j in tqdm.trange(len(self.universal_grid)):
-            weights = np.array([1/self[name].error[j]**2 for name in self])
-            M = len(np.where(weights > 0)[0])
-            variance = np.nansum([(self[name].flux[j] - self.stacked_flux[j])**2 / self[name].error[j]**2 for name in self]) \
-                       / ((M-1)/M * np.nansum(weights))
-            self.stacked_err[j] = np.sqrt(variance)
+    @staticmethod
+    @njit
+    def _coadd_flux_err(flux, error):
+        weights = 1/error**2
+        M = len(np.where(weights > 0)[0])
+        stacked_flux = np.nansum(flux*weights) / np.nansum(weights)
+        stacked_err = np.sqrt(
+            np.nansum((flux - stacked_flux)**2*weights) / ((M-1)/M * np.nansum(weights))
+        )
+        return stacked_flux, stacked_err
 
     def plot_stacked(self, fname, emline_color="rebeccapurple", absorp_color="darkgoldenrod", backend='plotly'):
         """

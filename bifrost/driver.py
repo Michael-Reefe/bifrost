@@ -10,7 +10,7 @@ from bifrost import spectrum, utils, filters
 
 
 def driver(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=False, plot_backend='plotly',
-         plot_spec=None, limits=None, _filters=None):
+         plot_spec=None, limits=None, _filters=None, name_by='folder'):
     """
     The main driver for the stacking code.
 
@@ -33,6 +33,9 @@ def driver(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=Fals
         Limit to only use data in the range of these indices.
     :param _filters: str, iterable
         Filter objects to be applied to the Stack.
+    :param name_by: str
+        "folder" or "file" : how to specify object keys, based on the name of the fits file or the folder that the fits
+        file is in.
     :return stack: Stack
         The Stack object.
     """
@@ -58,8 +61,10 @@ def driver(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=Fals
         filter_list.append(filters.Filter.from_str(_filter))
     stack = spectrum.Stack(filters=filter_list)
 
+    assert name_by in ('file', 'folder'), "name_by must be one of ['file', 'folder']"
     def make_spec(filepath):
-        ispec = spectrum.Spectrum.from_fits(filepath, name=filepath.split(os.sep)[-1])
+        ind = -1 if name_by == 'file' else -2
+        ispec = spectrum.Spectrum.from_fits(filepath, name=filepath.split(os.sep)[ind])
         return ispec
 
     print('Loading in spectra...')

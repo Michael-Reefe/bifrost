@@ -15,7 +15,7 @@ def cli_run(args):
     """
     backend = 'pyplot' if args.use_pyplot else 'plotly'
     driver(args.data_path, out_path=args.out_path, n_jobs=args.n_jobs, save_pickle=args.pickle, save_json=args.json,
-           plot_backend=backend, plot_spec=args.plot_spec, limits=args.limit, _filters=args.filters)
+           plot_backend=backend, plot_spec=args.plot_spec, limits=args.limit, _filters=args.filters, name_by=args.name_by)
 
 
 def plot_run(args):
@@ -77,6 +77,9 @@ def main():
                             help='Limit to only use the data between 2 indices.')
     run_driver.add_argument('--filters', '-f', metavar='STR', type=str, nargs='+', dest='filters', default=None,
                             help='Add filters to the spectra used in the stack.')
+    run_driver.add_argument('--name-by', '-b', metavar='STR', type=str, dest='name_by', default='folder',
+                            help='Name objects by their file name or folder name.  If folder, cannot have 2 objects '
+                                 'within the same folder.')
     run_driver.set_defaults(func=cli_run)
 
     # Replotting command
