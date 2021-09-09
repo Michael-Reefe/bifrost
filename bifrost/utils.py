@@ -1,6 +1,7 @@
 import os
 import glob
 import time
+import re
 import datetime
 from numba import jit, njit, prange
 import numpy as np
@@ -37,6 +38,54 @@ def gen_datestr(time=False):
     else:
         dt_string = now.strftime("%Y%m%d")
     return dt_string
+
+
+def truncate(number, digits) -> float:
+    stepper = 10.0 ** digits
+    return int(stepper * number) / stepper
+
+
+def sexagesimal(decimal: float, precision=2) -> str:
+    hh = int(decimal)
+    f1 = hh if hh != 0 else 1
+
+    extra = decimal % f1
+    if f1 == 1 and decimal < 0:
+        extra -= 1
+    mm = int(extra * 60)
+    f2 = mm if mm != 0 else 1
+
+    extra2 = (extra * 60) % f2
+    if f2 == 1 and (extra * 60) < 0:
+        extra2 -= 1
+    ss = extra2 * 60
+
+    hh = abs(hh)
+    mm = abs(mm)
+    ss = abs(ss)
+
+    ss = truncate(ss, precision)
+    fmt = '{:02d}:{:02d}:{:0%d.%df}' % (precision+3, precision)
+    sign = '-' if decimal < 0 else ''
+    return sign + fmt.format(hh, mm, ss)
+
+
+def decimal(sexagesimal: str) -> float:
+    splitter = 'd|h|m|s|:| '
+    valtup = re.split(splitter, sexagesimal)
+    hh, mm, ss = float(valtup[0]), float(valtup[1]), float(valtup[2])
+    if hh > 0 or valtup[0] == '+00' or valtup[0] == '00':
+        return hh + mm/60 + ss/3600
+    elif hh < 0 or valtup[0] == '-00':
+        return hh - mm/60 - ss/3600
+
+
+def coord_name(ra, dec):
+    sign = '+' if dec >= 0 else ''
+    ra /= 15
+    ra = sexagesimal(ra, 2).replace(':', '')
+    dec = sexagesimal(dec, 1).replace(':', '')
+    return 'RA: '+ra+', Dec: '+sign+dec
 
 
 # Make a wrapper to time each call of a function

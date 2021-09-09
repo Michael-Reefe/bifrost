@@ -14,8 +14,39 @@ def cli_run(args):
     :return None:
     """
     backend = 'pyplot' if args.use_pyplot else 'plotly'
+
+    # Parse table property arguments
+    prop_tbl = None
+    prop_sep = None
+    prop_com = None
+    prop_name_col = None
+    if args.props:
+        prop_tbl = args.props[0]
+        prop_args = len(args.props)
+        if prop_args > 1:
+            prop_sep = args.props[1]
+        if prop_args > 2:
+            prop_com = args.props[2]
+        if prop_args > 3:
+            prop_name_col = int(args.props[3])
+        if prop_args > 4:
+            raise SyntaxError("Found too many arguments for table properties!")
+
+    # Parse binning arguments
+    bin_quant = None
+    bin_num = None
+    bin_log = False
+    if args.bin:
+        bin_quant = args.bin[0]
+        bin_num = int(args.bin[1])
+        if 'log_' in bin_quant:
+            bin_quant = bin_quant.replace('log_', '')
+            bin_log = True
+
     driver(args.data_path, out_path=args.out_path, n_jobs=args.n_jobs, save_pickle=args.pickle, save_json=args.json,
-           plot_backend=backend, plot_spec=args.plot_spec, limits=args.limit, _filters=args.filters, name_by=args.name_by)
+           plot_backend=backend, plot_spec=args.plot_spec, limits=args.limit, _filters=args.filters, name_by=args.name_by,
+           properties_tbl=prop_tbl, properties_comment=prop_com, properties_sep=prop_sep, properties_name_col=prop_name_col,
+           bin_quant=bin_quant, nbins=bin_num, bin_size=None, bin_log=bin_log)
 
 
 def plot_run(args):
@@ -26,7 +57,16 @@ def plot_run(args):
     :return None:
     """
     backend = 'pyplot' if args.use_pyplot else 'plotly'
-    plotter(args.stack_path, out_path=args.out_path, plot_backend=backend, plot_spec=args.plot_spec)
+    if args.hist or args.hist_log:
+        hist = True
+    else:
+        hist = False
+    if args.hist_log:
+        log = True
+    else:
+        log = False
+    plotter(args.stack_path, out_path=args.out_path, plot_backend=backend, plot_spec=args.plot_spec, plot_hist=hist,
+            plot_log=log)
 
 
 def config_run(args):
@@ -77,9 +117,16 @@ def main():
                             help='Limit to only use the data between 2 indices.')
     run_driver.add_argument('--filters', '-f', metavar='STR', type=str, nargs='+', dest='filters', default=None,
                             help='Add filters to the spectra used in the stack.')
-    run_driver.add_argument('--name-by', '-b', metavar='STR', type=str, dest='name_by', default='folder',
-                            help='Name objects by their file name or folder name.  If folder, cannot have 2 objects '
+    run_driver.add_argument('--name-by', '-N', metavar='STR', type=str, dest='name_by', default='folder',
+                            help='Name objects by their file name, folder name, or IAU name.  If folder, cannot have 2 objects '
                                  'within the same folder.')
+    run_driver.add_argument('--table', '-t', metavar='STR', type=str, nargs='+', dest='props', default=None,
+                            help='File path to a table with information about each spectrum.  Names in the table must '
+                                 'match the file or folder names of each spectrum.  Optional additional parameters include '
+                                 'the delimiter [SEP], comment character [COM], and name column index [I], in that order.')
+    run_driver.add_argument('--bin', '-b', metavar='STR', type=str, nargs=2, dest='bin', default=None,
+                            help='Quantity to bin by, must be within the table file, followed by the number of bins. '
+                                 'If you want to take the log10 of the item before binning, enter as "log_[item]"')
     run_driver.set_defaults(func=cli_run)
 
     # Replotting command
@@ -90,6 +137,9 @@ def main():
                              help='Use this option to plot with the pyplot module insteaad of plotly.')
     plot_driver.add_argument('--plot-spec', '-s', metavar='N', nargs='+', dest='plot_spec', default=None,
                              help='Specify the indices of which spectra to plot individually instead of plotting the stack.')
+    plot_driver.add_argument('--plot-hist', '-H', action='store_true', dest='hist', help='Plot histogram of binned data.')
+    plot_driver.add_argument('--plot-hist-log', '-Hl', action='store_true', dest='hist_log', help='Plot a logarithmic histogram'
+                                                                                                  ' of binned data.')
     plot_driver.set_defaults(func=plot_run)
 
     # Edit config command

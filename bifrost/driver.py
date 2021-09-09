@@ -1,8 +1,10 @@
 import os
 import pickle
 import json
+import sys
 
 import numpy as np
+import pandas as pd
 import tqdm
 from joblib import Parallel, delayed
 
@@ -10,7 +12,8 @@ from bifrost import spectrum, utils, filters
 
 
 def driver(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=False, plot_backend='plotly',
-         plot_spec=None, limits=None, _filters=None, name_by='folder'):
+         plot_spec=None, limits=None, _filters=None, name_by='folder', properties_tbl=None, properties_comment='#',
+         properties_sep=',', properties_name_col=0, bin_quant=None, nbins=None, bin_size=None, bin_log=False):
     """
     The main driver for the stacking code.
 
@@ -36,6 +39,20 @@ def driver(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=Fals
     :param name_by: str
         "folder" or "file" : how to specify object keys, based on the name of the fits file or the folder that the fits
         file is in.
+    :param properties_tbl: str
+        A path to a table file (.csv, .tbl, .xlsx, .txt, ...) containing properties of the spectra that are being loaded
+        in separately.  The file MUST be in the correct format:
+            - The header must be the first uncommented row in the file
+            - Comments should be marked with properties_comment (Default: "#")
+            - Should be delimited by properties_sep (Default: ",")
+            - The properties_name_col (Default: 0)th column should be the object name, which should match the object name(s) read in from fits files/folders.
+            - All other columns should list properties that the user wants to be appended to Spectrum objects.
+    :param properties_sep: str
+        Delimiter for the properties_tbl file.  Default: ","
+    :param properties_comment: str
+        Comment character for the properties_tbl file.  Default: "#"
+    :param properties_name_col: int
+        Index of the column that speicifies object name in the properties_tbl file.  Default: 0.
     :return stack: Stack
         The Stack object.
     """
@@ -63,8 +80,14 @@ def driver(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=Fals
 
     assert name_by in ('file', 'folder'), "name_by must be one of ['file', 'folder']"
     def make_spec(filepath):
-        ind = -1 if name_by == 'file' else -2
-        ispec = spectrum.Spectrum.from_fits(filepath, name=filepath.split(os.sep)[ind])
+        name = None
+        if name_by == 'file':
+            name = filepath.split(os.sep)[-1]
+        elif name_by == 'folder':
+            name = filepath.split(os.sep)[-2]
+        # elif name_by == 'iau':
+        #     name = None
+        ispec = spectrum.Spectrum.from_fits(filepath, name=name)
         return ispec
 
     print('Loading in spectra...')
@@ -72,11 +95,21 @@ def driver(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=Fals
     for ispec in specs:
         stack.add_spec(ispec)
 
-    stack()
+    if properties_tbl:
+        print('Loading in table data...')
+        tbl_data = pd.read_csv(properties_tbl, delimiter=properties_sep, comment=properties_comment,
+                               skipinitialspace=True, header=0, index_col=properties_name_col)
+        for name in tqdm.tqdm(tbl_data.index):
+            assert name in stack.keys(), f"ERROR: {name} not found in Stack!"
+            for tbl_col in tbl_data.columns:
+                stack[name].data[tbl_col] = tbl_data[tbl_col][name]
+
+    stack(bin=bin_quant, nbins=nbins, bin_size=bin_size, log=bin_log)
     if plot_spec:
         stack.plot_spectra(out_path, spectra=plot_spec, backend=plot_backend)
-    format = '.html' if plot_backend == 'plotly' else '.pdf'
-    stack.plot_stacked(out_path+'stacked_plot'+format, backend=plot_backend)
+    stack.plot_stacked(out_path+'stacked_plot', backend=plot_backend)
+    if bin_quant:
+        stack.plot_hist(out_path+'binned_plot', plot_log=bin_log, backend=plot_backend)
     if save_pickle:
         stack.save_pickle(out_path+'stacked_data.pkl')
     if save_json:
@@ -85,7 +118,7 @@ def driver(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=Fals
     return stack
 
 
-def plotter(stack_path, out_path=None, plot_backend='plotly', plot_spec=None):
+def plotter(stack_path, out_path=None, plot_backend='plotly', plot_spec=None, plot_hist=False, plot_log=False):
     """
     Replot the stacked spectra.
 
@@ -100,7 +133,6 @@ def plotter(stack_path, out_path=None, plot_backend='plotly', plot_spec=None):
     :return None:
     """
     format = stack_path.split('.')[-1]
-    plot_format = '.html' if plot_backend == 'plotly' else '.pdf'
     if not out_path:
         out_path = os.path.dirname(stack_path)
     if format == 'json':
@@ -114,8 +146,7 @@ def plotter(stack_path, out_path=None, plot_backend='plotly', plot_spec=None):
             )
             fs = [filters.Filter.from_str(ff) for ff in _dict['filters']]
             return spectrum.Stack(universal_grid=np.array(_dict['universal_grid']), stacked_flux=np.array(_dict['stacked_flux']),
-                                  stacked_err=np.array(_dict['stacked_err']), resampled=_dict['resampled'], normalized=_dict['normalized'],
-                                  filters=fs, **options)
+                                  stacked_err=np.array(_dict['stacked_err']), filters=fs, **options)
 
         stack = json.load(open(stack_path, 'r'), object_hook=json_stack_hook)
     elif format == 'pkl':
@@ -124,12 +155,18 @@ def plotter(stack_path, out_path=None, plot_backend='plotly', plot_spec=None):
         raise ValueError(f"Cannot read object file type: {format}")
 
     if not plot_spec:
-        stack.plot_stacked(os.path.join(out_path, 'stacked_plot'+plot_format), backend=plot_backend)
+        stack.plot_stacked(os.path.join(out_path, 'stacked_plot'), backend=plot_backend)
     else:
         if format == 'json':
             raise AttributeError("Cannot read individual spectra from a saved json file, only the stacked data "
                                  "is saved.")
         stack.plot_spectra(out_path, spectra=plot_spec, backend=plot_backend)
+    if plot_hist:
+        stack.plot_hist(os.path.join(out_path, 'stacked_plot'), backend=plot_backend, plot_log=plot_log)
+
+
+def rebin():
+    pass
 
 
 def edit_config(**options):

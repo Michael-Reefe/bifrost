@@ -32,9 +32,9 @@ import bifrost.filters as bfilters
 
 class Spectrum:
 
-    __slots__ = ['wave', 'flux', 'error', 'redshift', 'ebv', 'name', 'output_path', '_corrected', 'data']
+    __slots__ = ['wave', 'flux', 'error', 'redshift', 'ra', 'dec', 'ebv', 'name', 'output_path', '_corrected', 'data']
 
-    def __init__(self, wave, flux, error, redshift=None, ebv=None, name='Generic', output_path=None, **data):
+    def __init__(self, wave, flux, error, redshift=None, ra=None, dec=None, ebv=None, name='Generic', output_path=None, **data):
         """
         A class containing data and attributes for a single spectrum of an astronomical object.
 
@@ -50,6 +50,10 @@ class Spectrum:
             ***IMPORTANT***
             If none is provided, it is assumed the given wavelength is already corrected to be in the rest frame of the
             source.
+        :param ra: float
+            Right ascension in hours.
+        :param dec: float
+            Declination in degrees.
         :param ebv: float
             Extinction (B-V) color of the object in mag.
             ***IMPORTANT***
@@ -69,6 +73,9 @@ class Spectrum:
         self.error = error
         # Redshift in units of c
         self.redshift = redshift
+        # Coordinates
+        self.ra = ra
+        self.dec = dec
         # Extinction in (B-V) magnitudes
         self.ebv = ebv
         # Name
@@ -89,7 +96,7 @@ class Spectrum:
         s += f"{self.name} Spectrum \n"
         s += '########################################################################################\n'
         corrstr = "(corrected)" if self._corrected else "(uncorrected)"
-        s += f"Wavelength range " + corrstr + f": \t {np.min(self.wave)} - {np.max(self.wave)} angstroms\n"
+        s += f"Wavelength range " + corrstr + f":       \t {np.min(self.wave)} - {np.max(self.wave)} angstroms\n"
         s += f"Flux range:                        \t {np.max(np.concatenate(([np.min(self.flux)], [0.0])))} - {np.max(self.flux)} * 10^-17 erg cm^-2 s^-1 angstrom^-1\n"
         s += f"Redshift:                          \t z = {self.redshift}\n"
         s += f"Extinction:                        \t E(B-V) = {self.ebv}\n"
@@ -264,7 +271,7 @@ class Spectrum:
 
         :param filepath: str
             The path to the fits file
-        :param name: str
+        :param name: str, optional
             The name of the spectrum.
         :return cls: Spectrum
             The Spectrum object created from the fits file.
@@ -292,10 +299,10 @@ class Spectrum:
 
             if save_all_data:
                 for key in specobj.names:
-                    if key != 'z':
+                    if key not in ('z', 'PLUG_RA', 'PLUG_DEC'):
                         data_dict[key] = specobj[key]
                 for key in hdu[0].header:
-                    if key not in data_dict.keys():
+                    if key not in data_dict.keys() and key not in ('RA', 'DEC'):
                         data_dict[key] = hdu[0].header[key]
                 for key in hdu[1].data.names:
                     if key not in data_dict.keys() and key not in ('flux', 'loglam', 'ivar'):
@@ -309,6 +316,9 @@ class Spectrum:
         del t
         del specobj
         gc.collect()
+
+        # if not name:
+        #     name = utils.iauname(ra, dec)
 
         ### Interpolating over bad pixels ###
         bad = np.where(~np.isfinite(flux) & ~np.isfinite(error))[0]
@@ -353,7 +363,7 @@ class Spectrum:
             error.byteswap(inplace=True)
             error.dtype = '<f4'
 
-        return cls(wave, flux, error, redshift=z, ebv=ebv, name=name, **data_dict)
+        return cls(wave, flux, error, redshift=z, ra=ra/15, dec=dec, ebv=ebv, name=name, **data_dict)
 
 
 class Spectra(dict):
@@ -469,6 +479,11 @@ class Spectra(dict):
             return super().__getitem__(key)
         elif t is int:
             return self[list(self.keys())[key]]
+        # elif t in (list, tuple, np.ndarray):
+        #     if type(key[0]) in (str, np.str, np.str_):
+        #         return [super().__getitem__(ki) for ki in key]
+        #     elif type(key[0]) is int:
+        #         return [self[list(self.keys())[ki]] for ki in key]
 
     def __delitem__(self, key):
         t = type(key)
@@ -519,7 +534,7 @@ class Spectra(dict):
 
 class Stack(Spectra):
 
-    def __init__(self, universal_grid=None, stacked_flux=None, stacked_err=None, resampled=False, normalized=False,
+    def __init__(self, universal_grid=None, stacked_flux=None, stacked_err=None, normalized=False,
                  filters=None, **options):
         """
         An extension of the Spectra class (and by extension, the dictionary) specifically for stacking purposes.
@@ -549,20 +564,32 @@ class Stack(Spectra):
             filters.append(bfilters.Filter.from_str(f))
         self.filters = filters
         # Default object properties that will be filled in later
+        if not universal_grid:
+            universal_grid = []
+        if not stacked_flux:
+            stacked_flux = []
+        if not stacked_err:
+            stacked_err = []
         self.universal_grid = universal_grid
         self.stacked_flux = stacked_flux
         self.stacked_err = stacked_err
-        self.resampled = resampled
-        self.normalized = normalized
+        self.binned = None
+        self.binned_spec = None
+        self.bin_counts = None
+        self.bin_edges = None
+        self.bin_log = False
         super().__init__()
 
-    def calc_norm_region(self):
+    def calc_norm_region(self, wave_grid, binned_spec=None):
         """
         Calculate the optimal region to perform normalization. Finds the largest span of wavelengths between
         absportion lines that is also covered by all the spectra in the dictionary.  Fails if no such region can
         be found.  The region is set to the instance attribute self.norm_region.
 
-        :return None:
+        :param binned_spec: iterable
+            A list of spectra names to use.  If None, all are used.
+        :return nr0, nr1: tuple
+            The left and right edges of the normalization region.
         """
         emlines = np.array([1033.820, 1215.240, 1240.810, 1305.530, 1335.310, 1397.610, 1399.800, 1549.480, 1640.400,
                             1665.850, 1857.400, 1908.734, 2326.000, 2439.500, 2799.117, 3346.790, 3426.850, 3727.092,
@@ -571,16 +598,17 @@ class Stack(Spectra):
         abslines = np.array([3934.777, 3969.588, 5176.700, 5895.600, 8500.3600, 8544.440, 8664.520])
         lines = np.concatenate((emlines, abslines))
         lines.sort()
+        spectra = binned_spec if binned_spec is not None else [s for s in self]
         diffs = np.diff(lines)
         for _ in range(len(diffs)):
             imax = np.nanargmax(diffs)
             nr0, nr1 = lines[imax], lines[imax+1]
-            if self[0].wave[0] < nr0 < self[0].wave[-1] and self[0].wave[0] < nr1 < self[0].wave[-1]:
-                self.norm_region = (nr0, nr1)
+            if wave_grid[0] < nr0 < wave_grid[-1] and wave_grid[0] < nr1 < wave_grid[-1]:
                 return nr0, nr1
             else:
                 diffs[imax] = np.nan
-        raise ValueError("A normalization region could not be found!")
+        print("WARNING: An ideal normalization region could not be found!  Using the entire range.")
+        return wave_grid[0], wave_grid[-1]
 
     def filter_spectra(self):
         """
@@ -602,9 +630,73 @@ class Stack(Spectra):
             for r in removals:
                 del self[r]
 
+    def bin_spectra(self, bin_quantity, bin_size=None, nbins=None, log=False):
+        """
+        Place spectra into bins for the bin_quantity.
+
+        :param bin_quantity: str
+            The quantity that the data should be binned by.  Spectra must have appropriate values within their
+            self.data dictionaries.
+        :param bin_size: float
+            How large each bin should be.  If specified, then do not also specify nbins.
+        :param nbins: int
+            The number of bins to use.  If specified, then do not also specify bin_size.
+        :param log: bool
+            Whether or not to take the log_10 of the bin_quantity before binning.
+        :return binned_spec: dict
+            Dictionary containing the names of the spectra within each bin.  The keys are the bin indices.
+        :return bin_counts: np.ndarray(shape=(nbins,))
+            The number of spectra in each bin.
+        :return bin_edges: np.ndarray(shape=(nbins+1,))
+            The edge values of each bin.
+        """
+        self.bin_log = log
+        # Make sure arguments make sense
+        if not bin_size and not nbins:
+            raise ValueError("One of {bin_size,nbins} must be specified!")
+        if bin_size and nbins:
+            raise ValueError("Both of {bin_size,nbins} may not be specified!")
+
+        # Load in the data from each spectrum and make an array of the appropriate quantity and names
+        data = self.to_numpy('data')['data']
+        unbinned = np.array([], dtype=np.float64)
+        included = np.array([], dtype=np.str)
+        for ispec in self:
+            # Gather the data to bin
+            i = self.get_spec_index(ispec)
+            if bin_quantity not in data[i].keys():
+                print(f"WARNING: bin_quantity not found in {ispec} data!  Ignoring this spectrum")
+                continue
+            included = np.append(included, ispec)
+            id = data[i][bin_quantity]
+            if log:
+                id = np.log10(id)
+            unbinned = np.append(unbinned, id)
+
+        # Perform the binning
+        minbin = np.nanmin(unbinned)
+        maxbin = np.nanmax(unbinned)
+        if bin_size:
+            nbins = -(-(maxbin-minbin) // bin_size)
+        elif nbins:
+            bin_size = (maxbin-minbin) / nbins
+
+        binned_spec = {i: np.array([], dtype=np.str) for i in range(nbins)}
+        bin_counts = np.zeros(nbins)
+
+        bin_edges = minbin + np.arange(0, nbins+1, 1)*bin_size
+        for i in range(len(included)):
+            indx = int((unbinned[i] - minbin) / bin_size)
+            if unbinned[i] == maxbin:
+                indx -= 1
+            binned_spec[indx] = np.append(binned_spec[indx], included[i])
+            bin_counts[indx] += 1
+
+        return binned_spec, bin_counts, bin_edges
+
     # Allow the class to be called as a way to perform the stacking
     @utils.timer(name='Stack Procedure')
-    def __call__(self):
+    def __call__(self, bin=None, nbins=None, bin_size=None, log=False):
         """
         The main procedure for stacking spectra.  Performs all necessary steps at once:
             1. Convert each spectra to their rest-frame wavelengths using their redshifts.
@@ -624,14 +716,35 @@ class Stack(Spectra):
         """
         self.correct_spectra()
         self.filter_spectra()
-        if type(self.universal_grid) is not np.ndarray:
-            self.uniform_wave_grid()
-        if not self.resampled:
-            self.resample()
-        if not self.normalized:
-            self.normalize()
-        self.coadd()
-        return self.universal_grid, self.stacked_flux, self.stacked_err
+        if bin:
+            binned_spectra, bin_counts, bin_edges = self.bin_spectra(bin, bin_size=bin_size, nbins=nbins, log=log)
+            for b in binned_spectra:
+                spectra = binned_spectra[b]
+                wave_grid_b, spectra = self.uniform_wave_grid(spectra)
+                self.resample(wave_grid_b, spectra)
+                nr0, nr1 = self.calc_norm_region(wave_grid_b, spectra)
+                self.normalize(wave_grid_b, (nr0, nr1), spectra)
+                flux_b, err_b = self.coadd(wave_grid_b, spectra)
+                self.universal_grid.append(wave_grid_b)
+                self.stacked_flux.append(flux_b)
+                self.stacked_err.append(err_b)
+            self.binned = bin
+            self.binned_spec = binned_spectra
+            self.bin_counts = bin_counts
+            self.bin_edges = bin_edges
+        else:
+            wave_grid, _ = self.uniform_wave_grid()
+            self.resample(wave_grid)
+            nr0, nr1 = self.calc_norm_region(wave_grid)
+            self.normalize(wave_grid, (nr0, nr1))
+            flux, err = self.coadd(wave_grid)
+            self.universal_grid.append(wave_grid)
+            self.stacked_flux.append(flux)
+            self.stacked_err.append(err)
+            self.binned = None
+            self.binned_spec = None
+            self.bin_counts = None
+            self.bin_edges = None
 
     def correct_spectra(self):
         """
@@ -642,18 +755,23 @@ class Stack(Spectra):
         print('Correcting spectra to rest-frame wavelengths and adjusting for galactic extinction...')
         super().correct_spectra(r_v=self.r_v)
 
-    def uniform_wave_grid(self):
+    def uniform_wave_grid(self, binned_spec=None):
         """
         Create a uniform grid of wavelengths with spacing gridspace, covering only the regions where all spectra in
         the dictionary overlap.
 
-        :return None:
+        :param binned_spec: iterable
+            A list of spectra names to use.  If None, all are used.
+        :return wave_grid:
+            The universal wave grid.
         """
         print('Calculating a universal wave grid...')
-        wave = self.to_numpy('wave')['wave']
+        binned_indices = np.array([self.get_spec_index(name) for name in binned_spec])
+        wave = self.to_numpy('wave')['wave'][binned_indices]
         wmin = -1
         wmax = 1e10
-        all_names = np.array([s for s in self])
+        all_names = binned_spec if binned_spec is not None else np.array([s for s in self], dtype=np.str)
+        removed_names = np.array([], dtype=np.int)
         for i, wi in enumerate(wave):
             remove = False
             imin = np.nanmin(wi)
@@ -671,40 +789,48 @@ class Stack(Spectra):
             if remove:
                 print(f"WARNING: Removing spectrum {i+1}: {all_names[i]} due to insufficient wavelength coverage.")
                 del self[all_names[i]]
+                removed_names = np.append(removed_names, i)
 
+        all_names = np.delete(all_names, removed_names)
         wave_grid = np.arange(int(wmin), int(wmax)+self.gridspace, self.gridspace)
-        self.universal_grid = wave_grid
+        return wave_grid, all_names
 
-    def resample(self):
+    def resample(self, wave_grid, binned_spec=None):
         """
         Resample the current spectra to a new, uniform wavelength grid while preserving flux and error across the
         interpolation.
 
+        :param wave_grid: np.ndarray
+            The grid of wavelengths to resample to.
+        :param binned_spec: iterable
+            A list of spectra names to use.  If None, all are used.
         :return None:
         """
         print('Resampling spectra over a uniform wave grid...')
-        for ispec in tqdm.tqdm(self):
-            self[ispec].flux, self[ispec].error = utils.spectres(self.universal_grid, self[ispec].wave, self[ispec].flux, spec_errs=self[ispec].error, fill=np.nan)
-            self[ispec].wave = self.universal_grid
-        self.resampled = True
+        ss = binned_spec if binned_spec is not None else [s for s in self]
+        for ispec in tqdm.tqdm(ss):
+            self[ispec].flux, self[ispec].error = utils.spectres(wave_grid, self[ispec].wave, self[ispec].flux, self[ispec].error, fill=np.nan)
+            self[ispec].wave = wave_grid
 
-    def normalize(self):
+    def normalize(self, wave_grid, norm_region, binned_spec=None):
         """
         Normalize all spectra by the median of the normalization region.
 
+        :param norm_region: tuple
+            The left and right edges of wavelength to normalize by.
+        :param binned_spec: iterable
+            A list of spectra names to use.  If None, all are used.
         :return None:
         """
         print('Normalizing spectra...')
-        if not self.norm_region:
-            self.calc_norm_region()
         # Use the first spectra's wave since by this point they should all be equal anyways, to calculate the region to fit
-        reg = np.where((self.norm_region[0] < self.universal_grid) & (self.universal_grid < self.norm_region[1]))[0]
-        for ispec in tqdm.tqdm(self):
+        reg = np.where((norm_region[0] < wave_grid) & (wave_grid < norm_region[1]))[0]
+        ss = binned_spec if binned_spec is not None else [s for s in self]
+        for ispec in tqdm.tqdm(ss):
             self[ispec].flux, self[ispec].error = self._norm(self[ispec].flux, self[ispec].error, reg)
             med = np.nanmedian(self[ispec].flux[reg])
             self[ispec].flux /= med
             self[ispec].error /= med
-        self.normalized = True
 
     @staticmethod
     @njit
@@ -714,38 +840,51 @@ class Stack(Spectra):
         error /= med
         return data, error
 
-    def coadd(self):
+    def coadd(self, wave_grid, binned_spec=None):
         """
         Coadd all spectra together into a single, stacked spectrum, using 1/sigma**2 as the weights.
 
+        :param binned_spec: iterable
+            A list of spectra names to use.  If None, all are used.
         :return None:
         """
-        self.stacked_flux = np.zeros_like(self.universal_grid, dtype=np.float64)
-        self.stacked_err = np.zeros_like(self.universal_grid, dtype=np.float64)
+        stacked_flux = np.zeros_like(wave_grid, dtype=np.float64)
+        stacked_err = np.zeros_like(wave_grid, dtype=np.float64)
 
         print('Coadding spectra...')
-        for i in tqdm.trange(len(self.universal_grid)):
-            flux_i = np.array([self[name].flux[i] for name in self])
-            err_i = np.array([self[name].error[i] for name in self])
-            self.stacked_flux[i], self.stacked_err[i] = self._coadd_flux_err(flux_i, err_i)
+        ss = binned_spec if binned_spec is not None else [s for s in self]
+        for i in tqdm.trange(len(wave_grid)):
+            flux_i = np.array([self[name].flux[i] for name in ss])
+            err_i = np.array([self[name].error[i] for name in ss])
+            if len(ss) > 1:
+                stacked_flux[i], stacked_err[i] = self._coadd_flux_err(flux_i, err_i)
+            else:
+                stacked_flux[i], stacked_err[i] = flux_i, err_i
+
+        return stacked_flux, stacked_err
 
     @staticmethod
     @njit
     def _coadd_flux_err(flux, error):
-        weights = 1/error**2
+        weights = 1 / error ** 2
         M = len(np.where(weights > 0)[0])
+        if np.isnan(flux).all() or np.isnan(error).all() or M <= 1:
+            return np.nan, np.nan
         stacked_flux = np.nansum(flux*weights) / np.nansum(weights)
         stacked_err = np.sqrt(
             np.nansum((flux - stacked_flux)**2*weights) / ((M-1)/M * np.nansum(weights))
         )
         return stacked_flux, stacked_err
 
-    def plot_stacked(self, fname, emline_color="rebeccapurple", absorp_color="darkgoldenrod", backend='plotly'):
+    def plot_stacked(self, fname_base, emline_color="rebeccapurple", absorp_color="darkgoldenrod", backend='plotly'):
         """
         Plot the stacked spectrum.
 
-        :param fname: str
+        :param fname_base: str
             The path and file name to save the figure to.
+        :param bin_num: int
+            Which stacked bin should be plotted.  Default is 0, or the first bin (if data is not binned, then it's the stack
+            of all spectra).
         :param emline_color: str
             If backend is 'pyplot', this specifies the color of the plotted emission lines.  Default is 'rebeccapurple'.
         :param absorp_color: str
@@ -755,84 +894,91 @@ class Stack(Spectra):
             'plotly'.
         :return None:
         """
+        format0 = '.html' if backend == 'plotly' else '.pdf'
         assert self.universal_grid is not None, "Universal grid has not yet been calculated!"
         assert self.stacked_flux is not None, "Stacked flux has not yet been calculated!"
         assert self.stacked_err is not None, "Stacked error has not yet been calculated!"
 
-        # Plot the spectrum and error
-        if backend == 'pyplot':
-            fig, ax = plt.subplots(figsize=(20, 10))
-            linewidth = .5
-            linestyle = '--'
-            ax.plot(self.universal_grid, self.stacked_flux, '-', color='k', lw=linewidth)
-            ax.fill_between(self.universal_grid, self.stacked_flux - self.stacked_err, self.stacked_flux + self.stacked_err,
-                            color='mediumaquamarine', alpha=0.5)
+        for bin_num in range(len(self.universal_grid)):
+            format = '_' + str(bin_num) + format0
+            fname = fname_base + format
+            wave = self.universal_grid[bin_num]
+            flux = self.stacked_flux[bin_num]
+            err = self.stacked_err[bin_num]
 
-            # Plot emission and absorption lines
+            # Plot the spectrum and error
+            if backend == 'pyplot':
+                fig, ax = plt.subplots(figsize=(20, 10))
+                linewidth = .5
+                linestyle = '--'
+                ax.plot(wave, flux, '-', color='k', lw=linewidth)
+                ax.fill_between(wave, flux-err, flux+err, color='mediumaquamarine', alpha=0.5)
 
-            # OVI, Ly-alpha, NV, OI, CII, SiIV, SiIV/OIV, CIV, HeII
-            # OIII, AlIII, CIII, CII, NeIV, MgII, NeV, NeVI, [OII]
-            # [OII], H-delta, H-gamma, [OIII], H-beta, [OIII], [OIII], [OI], [OI]
-            # [FeX], [NII], H-alpha, [NII], [SII], [SII], [FeXI]
-            emlines = np.array([1033.820, 1215.240, 1240.810, 1305.530, 1335.310, 1397.610, 1399.800, 1549.480, 1640.400,
-                                1665.850, 1857.400, 1908.734, 2326.000, 2439.500, 2799.117, 3346.790, 3426.850, 3727.092,
-                                3729.875, 4102.890, 4341.680, 4364.436, 4862.680, 4960.295, 5008.240, 6300.304, 6363.776,
-                                6374.510, 6549.860, 6564.610, 6585.270, 6718.290, 6732.670, 7891.800])
-            for line in emlines:
-                ax.axvline(line, color=emline_color, lw=linewidth, linestyle=linestyle, alpha=0.5)
+                # Plot emission and absorption lines
 
-            # Ca K, Ca H, Mg1b, Na, CaII, CaII, CaII
-            abslines = np.array([3934.777, 3969.588, 5176.700, 5895.600, 8500.3600, 8544.440, 8664.520])
-            for line in abslines:
-                ax.axvline(line, color=absorp_color, lw=linewidth, linestyle=linestyle, alpha=0.5)
+                # OVI, Ly-alpha, NV, OI, CII, SiIV, SiIV/OIV, CIV, HeII
+                # OIII, AlIII, CIII, CII, NeIV, MgII, NeV, NeVI, [OII]
+                # [OII], H-delta, H-gamma, [OIII], H-beta, [OIII], [OIII], [OI], [OI]
+                # [FeX], [NII], H-alpha, [NII], [SII], [SII], [FeXI]
+                emlines = np.array([1033.820, 1215.240, 1240.810, 1305.530, 1335.310, 1397.610, 1399.800, 1549.480, 1640.400,
+                                    1665.850, 1857.400, 1908.734, 2326.000, 2439.500, 2799.117, 3346.790, 3426.850, 3727.092,
+                                    3729.875, 4102.890, 4341.680, 4364.436, 4862.680, 4960.295, 5008.240, 6300.304, 6363.776,
+                                    6374.510, 6549.860, 6564.610, 6585.270, 6718.290, 6732.670, 7891.800])
+                for line in emlines:
+                    ax.axvline(line, color=emline_color, lw=linewidth, linestyle=linestyle, alpha=0.5)
 
-            # Set up axis labels and formatting
-            fontsize = 20
-            ax.set_xlabel(r'$\lambda_{\rm{rest}}$ ($\rm{\AA}$)', fontsize=fontsize)
-            ax.set_ylabel(r'$f_\lambda$ (normalized)', fontsize=fontsize)
-            ax.set_title('%s' % 'Stacked Spectrum', fontsize=fontsize)
-            ax.tick_params(axis='both', labelsize=fontsize - 2)
-            ax.set_xlim(np.nanmin(self.universal_grid), np.nanmax(self.universal_grid))
-            ax.set_ylim(0., np.nanmax(self.stacked_flux)+.1)
+                # Ca K, Ca H, Mg1b, Na, CaII, CaII, CaII
+                abslines = np.array([3934.777, 3969.588, 5176.700, 5895.600, 8500.3600, 8544.440, 8664.520])
+                for line in abslines:
+                    ax.axvline(line, color=absorp_color, lw=linewidth, linestyle=linestyle, alpha=0.5)
 
-            fig.savefig(fname, dpi=300, bbox_inches='tight')
-            plt.close()
-        elif backend == 'plotly':
-            fig = plotly.subplots.make_subplots(rows=1, cols=1)
-            linewidth = .5
-            fig.add_trace(plotly.graph_objects.Scatter(x=self.universal_grid, y=self.stacked_flux, line=dict(color='black', width=linewidth),
-                                                       name='Data', showlegend=False))
-            fig.add_trace(plotly.graph_objects.Scatter(x=self.universal_grid, y=self.stacked_flux+self.stacked_err,
-                                                       line=dict(color='#60dbbd', width=0), fillcolor='rgba(96, 219, 189, 0.6)',
-                                                       name='Upper Bound', showlegend=False))
-            fig.add_trace(plotly.graph_objects.Scatter(x=self.universal_grid, y=self.stacked_flux-self.stacked_err,
-                                                       line=dict(color='#60dbbd', width=0), fillcolor='rgba(96, 219, 189, 0.6)',
-                                                       fill='tonexty', name='Lower Bound', showlegend=False))
-            emlines = np.array([1033.820, 1215.240, 1240.810, 1305.530, 1335.310, 1397.610, 1399.800, 1549.480, 1640.400,
-                                1665.850, 1857.400, 1908.734, 2326.000, 2439.500, 2799.117, 3346.790, 3426.850, 3727.092,
-                                3729.875, 4102.890, 4341.680, 4364.436, 4862.680, 4960.295, 5008.240, 6300.304, 6363.776,
-                                6374.510, 6549.860, 6564.610, 6585.270, 6718.290, 6732.670, 7891.800])
-            abslines = np.array([3934.777, 3969.588, 5176.700, 5895.600, 8500.3600, 8544.440, 8664.520])
-            for line in emlines:
-                fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#663399')
-            for line in abslines:
-                fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#d1c779')
-            title = 'Stacked Spectra'
-            fig.update_layout(
-                yaxis_title='f<sub>&#955;</sub> (normalized)',
-                xaxis_title='&#955;<sub>rest</sub> (&#8491;)',
-                title=title,
-                hovermode='x'
-            )
-            fig.update_xaxes(
-                range=(np.nanmin(self.universal_grid), np.nanmax(self.universal_grid)),
-                constrain='domain'
-            )
-            fig.update_yaxes(
-                range=(0, np.nanmax(self.stacked_flux)+.3),
-                constrain='domain'
-            )
-            fig.write_html(fname)
+                # Set up axis labels and formatting
+                fontsize = 20
+                ax.set_xlabel(r'$\lambda_{\rm{rest}}$ ($\rm{\AA}$)', fontsize=fontsize)
+                ax.set_ylabel(r'$f_\lambda$ (normalized)', fontsize=fontsize)
+                ax.set_title('%s' % 'Stacked Spectrum', fontsize=fontsize)
+                ax.tick_params(axis='both', labelsize=fontsize - 2)
+                ax.set_xlim(np.nanmin(wave), np.nanmax(wave))
+                ax.set_ylim(0., np.nanmax(flux)+.3)
+
+                fig.savefig(fname, dpi=300, bbox_inches='tight')
+                plt.close()
+            elif backend == 'plotly':
+                fig = plotly.subplots.make_subplots(rows=1, cols=1)
+                linewidth = .5
+                fig.add_trace(plotly.graph_objects.Scatter(x=wave, y=flux, line=dict(color='black', width=linewidth),
+                                                           name='Data', showlegend=False))
+                fig.add_trace(plotly.graph_objects.Scatter(x=wave, y=flux+err,
+                                                           line=dict(color='#60dbbd', width=0), fillcolor='rgba(96, 219, 189, 0.6)',
+                                                           name='Upper Bound', showlegend=False))
+                fig.add_trace(plotly.graph_objects.Scatter(x=wave, y=flux-err,
+                                                           line=dict(color='#60dbbd', width=0), fillcolor='rgba(96, 219, 189, 0.6)',
+                                                           fill='tonexty', name='Lower Bound', showlegend=False))
+                emlines = np.array([1033.820, 1215.240, 1240.810, 1305.530, 1335.310, 1397.610, 1399.800, 1549.480, 1640.400,
+                                    1665.850, 1857.400, 1908.734, 2326.000, 2439.500, 2799.117, 3346.790, 3426.850, 3727.092,
+                                    3729.875, 4102.890, 4341.680, 4364.436, 4862.680, 4960.295, 5008.240, 6300.304, 6363.776,
+                                    6374.510, 6549.860, 6564.610, 6585.270, 6718.290, 6732.670, 7891.800])
+                abslines = np.array([3934.777, 3969.588, 5176.700, 5895.600, 8500.3600, 8544.440, 8664.520])
+                for line in emlines:
+                    fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#663399')
+                for line in abslines:
+                    fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#d1c779')
+                title = 'Stacked Spectra'
+                fig.update_layout(
+                    yaxis_title='f<sub>&#955;</sub> (normalized)',
+                    xaxis_title='&#955;<sub>rest</sub> (&#8491;)',
+                    title=title,
+                    hovermode='x'
+                )
+                fig.update_xaxes(
+                    range=(np.nanmin(wave), np.nanmax(wave)),
+                    constrain='domain'
+                )
+                fig.update_yaxes(
+                    range=(0, np.nanmax(flux)+.3),
+                    constrain='domain'
+                )
+                fig.write_html(fname)
 
     def plot_spectra(self, fname_root, spectra='all', backend='plotly'):
         """
@@ -846,12 +992,56 @@ class Stack(Spectra):
         if spectra == 'all' or spectra == ['all']:
             for item in tqdm.tqdm(self):
                 self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum'+format),
-                                normalized=self.normalized, backend=backend)
+                                normalized=True, backend=backend)
         else:
             slist = [self[s] for s in spectra]
             for item in tqdm.tqdm(slist):
                 item.plot(fname=os.path.join(fname_root, item.name.replace(' ', '_')+'.spectrum'+format),
-                          normalized=self.normalized, backend=backend)
+                          normalized=True, backend=backend)
+
+    def plot_hist(self, fname_base, plot_log=False, backend='plotly'):
+        """
+        Plot a histogram of the spectra in each bin.
+
+        :param fname_base: str
+            File name pattern.
+        :param backend: str
+            Whether to use matplotlib or plotly to plot stuff
+        :return None:
+        """
+        format = '.html' if backend == 'plotly' else '.pdf'
+        fname = fname_base + format
+        widths = np.diff(self.bin_edges)
+        midpts = (self.bin_edges[:-1] + self.bin_edges[1:])/2
+        nbins = len(widths)
+        if backend == 'pyplot':
+            fig, ax = plt.subplots()
+            ax.bar(midpts, self.bin_counts, widths, align='center', color='rebeccapurple', label='$n_{\\rm bins} = %d' % nbins,
+                   log=plot_log)
+            ax.set_xlabel(self.binned)
+            ax.set_ylabel('Number in bin')
+            ax.legend()
+            ax.set_xticks(self.bin_edges)
+            fig.savefig(fname, dpi=300, bbox_inches='tight')
+        elif backend == 'plotly':
+            fig = plotly.graph_objects.Figure(data=plotly.graph_objects.Bar(x=midpts, y=self.bin_counts))
+            fig.update_traces(marker_color='rgb(158,202,225)', marker_line_color='rgb(8,48,107)',
+                              marker_line_width=0.0, opacity=0.8)
+            xlabel = 'log<sub>10</sub>(' + self.binned + ')' if self.bin_log else self.binned
+            fig.update_layout(
+                xaxis_title=xlabel,
+                yaxis_title='Number in bin',
+                hovermode='x',
+                xaxis=dict(
+                    tickmode='array',
+                    tickvals=self.bin_edges
+                )
+            )
+            if plot_log:
+                fig.update_yaxes(
+                    type="log",
+                )
+            fig.write_html(fname)
 
     def save_json(self, filepath):
         """
@@ -874,7 +1064,6 @@ class Stack(Spectra):
     def __repr__(self):
         s = f"A collection of {len(self)} stacked spectra.\n"
         s += f"Corrected:  \t {self.corrected}\n"
-        s += f"Resampled:  \t {self.resampled}\n"
-        s += f"Normalized: \t {self.normalized}\n"
-        s += f"Stacked:    \t {True if type(self.stacked_flux) is np.ndarray else False}\n"
+        s += f"Stacked:    \t {True if len(self.stacked_flux) > 0 else False}\n"
+        s += f"Binned:     \t {'log_' if self.bin_log else ''}{self.binned}"
         return s
