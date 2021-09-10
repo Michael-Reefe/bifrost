@@ -17,9 +17,9 @@ def cli_run(args):
 
     # Parse table property arguments
     prop_tbl = None
-    prop_sep = None
-    prop_com = None
-    prop_name_col = None
+    prop_sep = ","
+    prop_com = "#"
+    prop_name_col = 0
     if args.props:
         prop_tbl = args.props[0]
         prop_args = len(args.props)
@@ -46,7 +46,7 @@ def cli_run(args):
     driver(args.data_path, out_path=args.out_path, n_jobs=args.n_jobs, save_pickle=args.pickle, save_json=args.json,
            plot_backend=backend, plot_spec=args.plot_spec, limits=args.limit, _filters=args.filters, name_by=args.name_by,
            properties_tbl=prop_tbl, properties_comment=prop_com, properties_sep=prop_sep, properties_name_col=prop_name_col,
-           bin_quant=bin_quant, nbins=bin_num, bin_size=None, bin_log=bin_log)
+           bin_quant=bin_quant, nbins=bin_num, bin_size=None, bin_log=bin_log, hist_log=args.hist_log)
 
 
 def plot_run(args):
@@ -61,12 +61,8 @@ def plot_run(args):
         hist = True
     else:
         hist = False
-    if args.hist_log:
-        log = True
-    else:
-        log = False
     plotter(args.stack_path, out_path=args.out_path, plot_backend=backend, plot_spec=args.plot_spec, plot_hist=hist,
-            plot_log=log)
+            plot_log=args.hist_log)
 
 
 def config_run(args):
@@ -126,7 +122,10 @@ def main():
                                  'the delimiter [SEP], comment character [COM], and name column index [I], in that order.')
     run_driver.add_argument('--bin', '-b', metavar='STR', type=str, nargs=2, dest='bin', default=None,
                             help='Quantity to bin by, must be within the table file, followed by the number of bins. '
-                                 'If you want to take the log10 of the item before binning, enter as "log_[item]"')
+                                 'If you want to take the log10 of the item before binning, enter as "log_[item]". '
+                                 'i.e. to bin by the log of a key called \'MASS_1\' with 10 bins: -b log_MASS_1 10')
+    run_driver.add_argument('--bin-log', '-bl', action='store_true', dest='hist_log', help='Make the y-axis of the binned'
+                                                                                           ' histogram logarithmic.')
     run_driver.set_defaults(func=cli_run)
 
     # Replotting command

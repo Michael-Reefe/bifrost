@@ -13,7 +13,8 @@ from bifrost import spectrum, utils, filters
 
 def driver(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=False, plot_backend='plotly',
          plot_spec=None, limits=None, _filters=None, name_by='folder', properties_tbl=None, properties_comment='#',
-         properties_sep=',', properties_name_col=0, bin_quant=None, nbins=None, bin_size=None, bin_log=False):
+         properties_sep=',', properties_name_col=0, bin_quant=None, nbins=None, bin_size=None, bin_log=False,
+         hist_log=False):
     """
     The main driver for the stacking code.
 
@@ -53,6 +54,16 @@ def driver(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=Fals
         Comment character for the properties_tbl file.  Default: "#"
     :param properties_name_col: int
         Index of the column that speicifies object name in the properties_tbl file.  Default: 0.
+    :param bin_quant: str
+        A quantity to bin the data by.
+    :param nbins: int
+        Number of bins.  Cannot be specified simultaneously with bin_size.
+    :param bin_size: float
+        The size of each bin.  Cannot be specified simultaneously with nbins.
+    :param bin_log: bool
+        Whether or not to take the log of bin_quant before binning.
+    :param hist_log: bool
+        Whether or not to make the y-axis of the binned histogram logarithmic.
     :return stack: Stack
         The Stack object.
     """
@@ -109,7 +120,7 @@ def driver(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=Fals
         stack.plot_spectra(out_path, spectra=plot_spec, backend=plot_backend)
     stack.plot_stacked(out_path+'stacked_plot', backend=plot_backend)
     if bin_quant:
-        stack.plot_hist(out_path+'binned_plot', plot_log=bin_log, backend=plot_backend)
+        stack.plot_hist(out_path+'binned_plot', plot_log=hist_log, backend=plot_backend)
     if save_pickle:
         stack.save_pickle(out_path+'stacked_data.pkl')
     if save_json:
@@ -162,7 +173,7 @@ def plotter(stack_path, out_path=None, plot_backend='plotly', plot_spec=None, pl
                                  "is saved.")
         stack.plot_spectra(out_path, spectra=plot_spec, backend=plot_backend)
     if plot_hist:
-        stack.plot_hist(os.path.join(out_path, 'stacked_plot'), backend=plot_backend, plot_log=plot_log)
+        stack.plot_hist(os.path.join(out_path, 'binned_plot'), backend=plot_backend, plot_log=plot_log)
 
 
 def rebin():

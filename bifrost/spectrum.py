@@ -667,10 +667,13 @@ class Stack(Spectra):
             if bin_quantity not in data[i].keys():
                 print(f"WARNING: bin_quantity not found in {ispec} data!  Ignoring this spectrum")
                 continue
-            included = np.append(included, ispec)
             id = data[i][bin_quantity]
             if log:
                 id = np.log10(id)
+            if np.isnan(id):
+                print(f"WARNING: bin_quantity is NaN in {ispec} data!  Ignoring this spectrum")
+                continue
+            included = np.append(included, ispec)
             unbinned = np.append(unbinned, id)
 
         # Perform the binning
@@ -720,6 +723,11 @@ class Stack(Spectra):
             binned_spectra, bin_counts, bin_edges = self.bin_spectra(bin, bin_size=bin_size, nbins=nbins, log=log)
             for b in binned_spectra:
                 spectra = binned_spectra[b]
+                if len(spectra) == 0:
+                    self.universal_grid.append(None)
+                    self.stacked_flux.append(None)
+                    self.stacked_err.append(None)
+                    continue
                 wave_grid_b, spectra = self.uniform_wave_grid(spectra)
                 self.resample(wave_grid_b, spectra)
                 nr0, nr1 = self.calc_norm_region(wave_grid_b, spectra)
@@ -766,11 +774,11 @@ class Stack(Spectra):
             The universal wave grid.
         """
         print('Calculating a universal wave grid...')
-        binned_indices = np.array([self.get_spec_index(name) for name in binned_spec])
+        all_names = binned_spec if binned_spec is not None else np.array([s for s in self], dtype=np.str)
+        binned_indices = np.array([self.get_spec_index(name) for name in all_names], dtype=np.int)
         wave = self.to_numpy('wave')['wave'][binned_indices]
         wmin = -1
         wmax = 1e10
-        all_names = binned_spec if binned_spec is not None else np.array([s for s in self], dtype=np.str)
         removed_names = np.array([], dtype=np.int)
         for i, wi in enumerate(wave):
             remove = False
@@ -905,6 +913,8 @@ class Stack(Spectra):
             wave = self.universal_grid[bin_num]
             flux = self.stacked_flux[bin_num]
             err = self.stacked_err[bin_num]
+            if wave is None or flux is None or err is None:
+                continue
 
             # Plot the spectrum and error
             if backend == 'pyplot':
@@ -1016,9 +1026,10 @@ class Stack(Spectra):
         nbins = len(widths)
         if backend == 'pyplot':
             fig, ax = plt.subplots()
-            ax.bar(midpts, self.bin_counts, widths, align='center', color='rebeccapurple', label='$n_{\\rm bins} = %d' % nbins,
+            ax.bar(midpts, self.bin_counts, widths, align='center', color='rebeccapurple', label='$n_{\\rm bins} = %d$' % nbins,
                    log=plot_log)
-            ax.set_xlabel(self.binned)
+            xlabel = '$\\log_{10}($' + self.binned + '$)$' if self.bin_log else self.binned
+            ax.set_xlabel(xlabel)
             ax.set_ylabel('Number in bin')
             ax.legend()
             ax.set_xticks(self.bin_edges)
