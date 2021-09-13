@@ -176,8 +176,25 @@ def plotter(stack_path, out_path=None, plot_backend='plotly', plot_spec=None, pl
         stack.plot_hist(os.path.join(out_path, 'binned_plot'), backend=plot_backend, plot_log=plot_log)
 
 
-def rebin():
-    pass
+def rebin(stack_path, bin_quant, nbins=None, bin_size=None, bin_log=False, plot_log=False, out_path=None, out_name=None,
+          plot_backend='plotly'):
+    format = stack_path.split('.')[-1]
+    if not out_path:
+        out_path = os.path.dirname(stack_path)
+    if not os.path.exists(out_path):
+        os.makedirs(out_path)
+    if format == 'json':
+        raise ValueError(f"Cannot rebin file type: {format}")
+    elif format == 'pkl':
+        stack = pickle.load(open(stack_path, 'rb'))
+
+    stack(bin=bin_quant, nbins=nbins, bin_size=bin_size, log=bin_log)
+    stack.plot_stacked(os.path.join(out_path, 'stacked_plot'), backend=plot_backend)
+    stack.plot_hist(os.path.join(out_path, 'binned_plot'), backend=plot_backend, plot_log=plot_log)
+
+    if not out_name:
+        out_name = 'stacked_data.pkl'
+    stack.save_pickle(os.path.join(out_path, out_name))
 
 
 def edit_config(**options):

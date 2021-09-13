@@ -5,6 +5,7 @@ import pickle
 import json
 import copy
 import gc
+import itertools
 
 # External packages
 import tqdm
@@ -630,7 +631,7 @@ class Stack(Spectra):
             for r in removals:
                 del self[r]
 
-    def bin_spectra(self, bin_quantity, bin_size=None, nbins=None, log=False):
+    def bin_spectra(self, bin_quantity, bin_size=None, nbins=None, log=False, midpoints=False, round_bins=None):
         """
         Place spectra into bins for the bin_quantity.
 
@@ -643,6 +644,11 @@ class Stack(Spectra):
             The number of bins to use.  If specified, then do not also specify bin_size.
         :param log: bool
             Whether or not to take the log_10 of the bin_quantity before binning.
+        :param midpoints: bool
+            Whether or not to return the midpoints of each bin instead of the edges.  Default is false.
+        :param round_bins: float
+            Whether or not to make bins regular, i.e. round to nice numbers like the nearest 0.1 or 0.5.
+            Round the bin edges to the nearest multiple of this float.
         :return binned_spec: dict
             Dictionary containing the names of the spectra within each bin.  The keys are the bin indices.
         :return bin_counts: np.ndarray(shape=(nbins,))
@@ -683,11 +689,18 @@ class Stack(Spectra):
             nbins = -(-(maxbin-minbin) // bin_size)
         elif nbins:
             bin_size = (maxbin-minbin) / nbins
+        if round_bins:
+            rating = 1/round_bins
+            minbin = np.floor(minbin*rating)/rating
+            maxbin = np.ceil(maxbin*rating)/rating
+            bin_size = round_bins
+            nbins = -int(-(maxbin-minbin) // bin_size)
 
         binned_spec = {i: np.array([], dtype=np.str) for i in range(nbins)}
         bin_counts = np.zeros(nbins)
 
         bin_edges = minbin + np.arange(0, nbins+1, 1)*bin_size
+        bin_midpts = minbin + (np.arange(0, nbins, 1) + 0.5)*bin_size
         for i in range(len(included)):
             indx = int((unbinned[i] - minbin) / bin_size)
             if unbinned[i] == maxbin:
@@ -695,7 +708,65 @@ class Stack(Spectra):
             binned_spec[indx] = np.append(binned_spec[indx], included[i])
             bin_counts[indx] += 1
 
+        if midpoints:
+            return binned_spec, bin_counts, bin_midpts
         return binned_spec, bin_counts, bin_edges
+
+    def histogram_3D(self, fname_base, bin_quantities, logs, nbins, round_bins=None, labels=None):
+
+        binx, biny, binz = bin_quantities
+        logx, logy, logz = logs
+        nbx, nby, nbz = nbins
+        if round_bins:
+            rbx, rby, rbz = round_bins
+        else:
+            rbx, rby, rbz = None, None, None
+        specx, countsx, edgex = self.bin_spectra(binx, log=logx, nbins=nbx, round_bins=rbx)
+        specy, countsy, edgey = self.bin_spectra(biny, log=logy, nbins=nby, round_bins=rby)
+        # specz, countsz, edgez = self.bin_spectra(binz, log=logz, nbins=nbz, round_bins=rbz)
+
+        nbx = len(countsx)
+        nby = len(countsy)
+        # nbz = len(countsz)
+        z_array = np.zeros(shape=(nby, nbx), dtype=np.float64)
+        n_array = np.zeros(shape=(nby, nbx), dtype=np.int64)
+        for x,y in itertools.product(np.arange(nbx), np.arange(nby)):
+            # specx[x], specy[y]
+            good_spec = np.array([], dtype=np.str)
+            z_spec = np.array([], dtype=np.float64)
+            for spec in specx[x]:
+                if spec in specy[y]:
+                    good_spec = np.append(good_spec, spec)
+                    zi = self[spec].data[binz]
+                    if logz:
+                        zi = np.log10(zi)
+                    z_spec = np.append(z_spec, zi)
+            z_array[y, x] = np.median(z_spec)
+            n_array[y, x] = good_spec.size
+
+        fig, ax = plt.subplots(figsize=(nbx/nby*7.5+3.5, 7.5))
+        mesh = ax.pcolormesh(edgex, edgey, z_array, shading='flat', vmin=np.min(z_array), vmax=np.max(z_array),
+                             cmap='viridis')
+
+        if not labels:
+            xlabel = binx if not logx else '$\\log_{10}($' + binx + '$)$'
+            ylabel = biny if not logy else '$\\log_{10}($' + biny + '$)$'
+            zlabel = binz if not logz else '$\\log_{10}($' + binz + '$)$'
+        else:
+            xlabel, ylabel, zlabel = labels
+        fig.colorbar(mesh, ax=ax, label=zlabel)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+
+        for x,y in itertools.product(np.arange(nbx), np.arange(nby)):
+            if n_array[y, x] > 0:
+                ax.text(edgex[x]+(edgex[x+1]-edgex[x])/2, edgey[y]+(edgey[y+1]-edgey[y])/2, str(n_array[y, x]),
+                        fontsize=7, horizontalalignment='center', verticalalignment='center')
+
+        ax.set_xticks(edgex[::3])
+        ax.set_yticks(edgey)
+        fig.savefig(fname_base+'.pdf', dpi=300, bbox_inches='tight')
+        plt.close()
 
     # Allow the class to be called as a way to perform the stacking
     @utils.timer(name='Stack Procedure')
@@ -719,6 +790,9 @@ class Stack(Spectra):
         """
         self.correct_spectra()
         self.filter_spectra()
+        self.universal_grid = []
+        self.stacked_flux = []
+        self.stacked_err = []
         if bin:
             binned_spectra, bin_counts, bin_edges = self.bin_spectra(bin, bin_size=bin_size, nbins=nbins, log=log)
             for b in binned_spectra:

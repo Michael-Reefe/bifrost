@@ -32,8 +32,8 @@ setuptools.setup(
         "Programming Language :: Python :: 3.8",
         "Operating System :: Unix"
     ],
-    entry_points={
-        'console_scripts': ['bifrost=bifrost.cli:main'],
-    },
+    # entry_points={
+    #     'console_scripts': ['bifrost=bifrost.cli:main'],
+    # },
     python_requires='>=3.7'
 )
