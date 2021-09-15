@@ -535,8 +535,7 @@ class Spectra(dict):
 
 class Stack(Spectra):
 
-    def __init__(self, universal_grid=None, stacked_flux=None, stacked_err=None, normalized=False,
-                 filters=None, **options):
+    def __init__(self, universal_grid=None, stacked_flux=None, stacked_err=None, filters=None, **options):
         """
         An extension of the Spectra class (and by extension, the dictionary) specifically for stacking purposes.
 
@@ -686,14 +685,14 @@ class Stack(Spectra):
         minbin = np.nanmin(unbinned)
         maxbin = np.nanmax(unbinned)
         if bin_size:
-            nbins = -(-(maxbin-minbin) // bin_size)
+            nbins = -int(-(maxbin-minbin) // bin_size)
         elif nbins:
             bin_size = (maxbin-minbin) / nbins
         if round_bins:
             rating = 1/round_bins
             minbin = np.floor(minbin*rating)/rating
             maxbin = np.ceil(maxbin*rating)/rating
-            bin_size = round_bins
+            bin_size = np.round(bin_size*rating)/rating
             nbins = -int(-(maxbin-minbin) // bin_size)
 
         binned_spec = {i: np.array([], dtype=np.str) for i in range(nbins)}
@@ -712,18 +711,26 @@ class Stack(Spectra):
             return binned_spec, bin_counts, bin_midpts
         return binned_spec, bin_counts, bin_edges
 
-    def histogram_3D(self, fname_base, bin_quantities, logs, nbins, round_bins=None, labels=None):
+    def histogram_3D(self, fname_base, bin_quantities, logs, nbins=None, bin_size=None, round_bins=None, labels=None,
+                     backend='plotly', colormap=None):
 
         binx, biny, binz = bin_quantities
         logx, logy, logz = logs
-        nbx, nby, nbz = nbins
+        if nbins:
+            nbx, nby, nbz = nbins
+        else:
+            nbx, nby, nbz = None, None, None
+        if bin_size:
+            bsx, bsy, bsz = bin_size
+        else:
+            bsx, bsy, bsz = None, None, None
         if round_bins:
             rbx, rby, rbz = round_bins
         else:
             rbx, rby, rbz = None, None, None
-        specx, countsx, edgex = self.bin_spectra(binx, log=logx, nbins=nbx, round_bins=rbx)
-        specy, countsy, edgey = self.bin_spectra(biny, log=logy, nbins=nby, round_bins=rby)
-        # specz, countsz, edgez = self.bin_spectra(binz, log=logz, nbins=nbz, round_bins=rbz)
+        specx, countsx, edgex = self.bin_spectra(binx, log=logx, nbins=nbx, bin_size=bsx, round_bins=rbx)
+        specy, countsy, edgey = self.bin_spectra(biny, log=logy, nbins=nby, bin_size=bsy, round_bins=rby)
+        # specz, countsz, edgez = self.bin_spectra(binz, log=logz, nbins=nbz, bin_size=bsz, round_bins=rbz)
 
         nbx = len(countsx)
         nby = len(countsy)
@@ -744,33 +751,85 @@ class Stack(Spectra):
             z_array[y, x] = np.median(z_spec)
             n_array[y, x] = good_spec.size
 
-        fig, ax = plt.subplots(figsize=(nbx/nby*7.5+3.5, 7.5))
-        mesh = ax.pcolormesh(edgex, edgey, z_array, shading='flat', vmin=np.min(z_array), vmax=np.max(z_array),
-                             cmap='viridis')
+        if backend == 'pyplot':
+            if not colormap:
+                colormap = 'winter'
+            fig, ax = plt.subplots(figsize=(nbx/nby*7.5+3.5, 7.5))
+            mesh = ax.pcolormesh(edgex, edgey, z_array, shading='flat', cmap=colormap)
 
-        if not labels:
-            xlabel = binx if not logx else '$\\log_{10}($' + binx + '$)$'
-            ylabel = biny if not logy else '$\\log_{10}($' + biny + '$)$'
-            zlabel = binz if not logz else '$\\log_{10}($' + binz + '$)$'
-        else:
-            xlabel, ylabel, zlabel = labels
-        fig.colorbar(mesh, ax=ax, label=zlabel)
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel(ylabel)
+            if not labels:
+                xlabel = binx if not logx else '$\\log_{10}($' + binx + '$)$'
+                ylabel = biny if not logy else '$\\log_{10}($' + biny + '$)$'
+                zlabel = binz if not logz else '$\\log_{10}($' + binz + '$)$'
+            else:
+                xlabel, ylabel, zlabel = labels
+            fig.colorbar(mesh, ax=ax, label=zlabel)
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel(ylabel)
 
-        for x,y in itertools.product(np.arange(nbx), np.arange(nby)):
-            if n_array[y, x] > 0:
-                ax.text(edgex[x]+(edgex[x+1]-edgex[x])/2, edgey[y]+(edgey[y+1]-edgey[y])/2, str(n_array[y, x]),
-                        fontsize=7, horizontalalignment='center', verticalalignment='center')
+            for x,y in itertools.product(np.arange(nbx), np.arange(nby)):
+                if n_array[y, x] > 0:
+                    ax.text(edgex[x]+(edgex[x+1]-edgex[x])/2, edgey[y]+(edgey[y+1]-edgey[y])/2, str(n_array[y, x]),
+                            fontsize=7, horizontalalignment='center', verticalalignment='center', color='white')
 
-        ax.set_xticks(edgex[::3])
-        ax.set_yticks(edgey)
-        fig.savefig(fname_base+'.pdf', dpi=300, bbox_inches='tight')
-        plt.close()
+            ax.set_xticks(edgex[::3])
+            ax.set_yticks(edgey)
+            fig.savefig(fname_base+'.pdf', dpi=300, bbox_inches='tight')
+            plt.close()
+        elif backend == 'plotly':
+            if not colormap:
+                colormap = 'plasma'
+            if not labels:
+                xlabel = binx if not logx else 'log<sub>10</sub>(' + binx + ')'
+                ylabel = biny if not logy else 'log<sub>10</sub>(' + biny + ')'
+                zlabel = binz if not logz else 'log<sub>10</sub>(' + binz + ')'
+            else:
+                xlabel, ylabel, zlabel = labels
+            fig = plotly.graph_objects.Figure(
+                data=plotly.graph_objects.Heatmap(x=edgex, y=edgey, z=z_array,
+                colorbar=dict(title=zlabel), colorscale=colormap)
+            )
+            for x,y in itertools.product(np.arange(nbx), np.arange(nby)):
+                if n_array[y, x] > 0:
+                    fig.add_annotation(text=str(n_array[y, x]), xref="x", yref="y", x=edgex[x]+(edgex[x+1]-edgex[x])/2,
+                                       y=edgey[y]+(edgey[y+1]-edgey[y])/2, showarrow=False, font=dict(size=7, color="white"))
+            fig.update_yaxes(
+                scaleratio=1,
+                showgrid=False,
+                zeroline=False,
+                showline=True,
+                linewidth=1,
+                linecolor='black',
+                mirror=True,
+                ticks='inside',
+                tickwidth=2,
+                tickcolor='black',
+                ticklen=10,
+                title_text=xlabel
+            )
+            fig.update_xaxes(
+                showgrid=False,
+                zeroline=False,
+                showline=True,
+                linewidth=1,
+                linecolor='black',
+                mirror=True,
+                ticks='inside',
+                tickwidth=2,
+                tickcolor='black',
+                ticklen=10,
+                title_text=ylabel
+            )
+            fig.update_layout(
+                # paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)'
+            )
+            fig.write_html(fname_base+'.html')
+
 
     # Allow the class to be called as a way to perform the stacking
     @utils.timer(name='Stack Procedure')
-    def __call__(self, bin=None, nbins=None, bin_size=None, log=False):
+    def __call__(self, bin=None, nbins=None, bin_size=None, log=False, round_bins=None, auto_norm_region=True):
         """
         The main procedure for stacking spectra.  Performs all necessary steps at once:
             1. Convert each spectra to their rest-frame wavelengths using their redshifts.
@@ -794,8 +853,11 @@ class Stack(Spectra):
         self.stacked_flux = []
         self.stacked_err = []
         if bin:
-            binned_spectra, bin_counts, bin_edges = self.bin_spectra(bin, bin_size=bin_size, nbins=nbins, log=log)
-            for b in binned_spectra:
+            binned_spectra, bin_counts, bin_edges = self.bin_spectra(bin, bin_size=bin_size, nbins=nbins, log=log,
+                                                                     round_bins=round_bins)
+            nn = len(binned_spectra)
+            for i, b in enumerate(binned_spectra):
+                print(f'BIN {i+1} OF {nn}...')
                 spectra = binned_spectra[b]
                 if len(spectra) == 0:
                     self.universal_grid.append(None)
@@ -804,7 +866,10 @@ class Stack(Spectra):
                     continue
                 wave_grid_b, spectra = self.uniform_wave_grid(spectra)
                 self.resample(wave_grid_b, spectra)
-                nr0, nr1 = self.calc_norm_region(wave_grid_b, spectra)
+                if auto_norm_region:
+                    nr0, nr1 = self.calc_norm_region(wave_grid_b, spectra)
+                else:
+                    nr0, nr1 = self.norm_region
                 self.normalize(wave_grid_b, (nr0, nr1), spectra)
                 flux_b, err_b = self.coadd(wave_grid_b, spectra)
                 self.universal_grid.append(wave_grid_b)
@@ -817,7 +882,10 @@ class Stack(Spectra):
         else:
             wave_grid, _ = self.uniform_wave_grid()
             self.resample(wave_grid)
-            nr0, nr1 = self.calc_norm_region(wave_grid)
+            if auto_norm_region:
+                nr0, nr1 = self.calc_norm_region(wave_grid)
+            else:
+                nr0, nr1 = self.norm_region
             self.normalize(wave_grid, (nr0, nr1))
             flux, err = self.coadd(wave_grid)
             self.universal_grid.append(wave_grid)
