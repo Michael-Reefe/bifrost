@@ -805,7 +805,7 @@ class Stack(Spectra):
                 tickwidth=2,
                 tickcolor='black',
                 ticklen=10,
-                title_text=xlabel
+                title_text=ylabel
             )
             fig.update_xaxes(
                 showgrid=False,
@@ -818,7 +818,7 @@ class Stack(Spectra):
                 tickwidth=2,
                 tickcolor='black',
                 ticklen=10,
-                title_text=ylabel
+                title_text=xlabel
             )
             fig.update_layout(
                 # paper_bgcolor='rgba(0,0,0,0)',
