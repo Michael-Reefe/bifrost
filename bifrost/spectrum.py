@@ -139,8 +139,48 @@ class Spectrum:
     def corrected(self):
         raise ValueError("The 'corrected' property may not be deleted!")
 
-    def plot(self, convolve_width=3, emline_color="rebeccapurple", absorp_color="darkgoldenrod", overwrite=False,
-             fname=None, backend='plotly', normalized=False):
+    def _calc_agn_dist(self, bpt_1, bpt_2, ref_point):
+        assert bpt_1 in self.data.keys() and bpt_2 in self.data.keys()
+        # Calculate x and y distance between this object and the reference point in the BPT plane
+        return ref_point[0] - self.data[bpt_1], ref_point[1] - self.data[bpt_2]
+
+    def calc_agn_frac(self, bpt_1, bpt_2, ref_point):
+        """
+        Calculate the AGN fraction of an object based on BPT data.
+
+        :param bpt_1: str
+            The name of the first BPT ratio, should be defined in self.data
+        :param bpt_2: str
+            The name of the second BPT ratio, should be defined in self.data
+        :param ref_point: tuple
+            The reference point to calculate the distance from
+        :return agn_frac: float
+            The AGN fraction of the object, defined as 1 / distance.
+        """
+        dx, dy = self._calc_agn_dist(bpt_1, bpt_2, ref_point)
+        d = np.hypot(dx, dy)
+        # AGN fraction = 1 / distance
+        self.data["agn_frac"] = 1/d
+        return self.data["agn_frac"]
+
+    def k01_agn_class(self, bpt_x, bpt_y):
+        """
+        Calculate whether the spectrum is classified as an AGN by the Kewley et al. 2001 classification scheme.
+
+        :param bpt_x: str
+            The name of the x axis BPT ratio, should be defined in self.data
+        :param bpt_y: str
+            The name of the y axis BPT ratio, should be defined in self.data
+        :return agn: bool
+            True if object is an AGN, otherwise False.
+        """
+        k_line = 0.61/(self.data[bpt_x]-0.47)+1.19
+        agn = self.data[bpt_y] > k_line or self.data[bpt_x] > 0
+        self.data["agn_class"] = agn
+        return self.data["agn_class"]
+
+    def plot(self, convolve_width=3, emline_color="rebeccapurple", absorp_color="darkgoldenrod", cline_color="cyan",
+             overwrite=False, fname=None, backend='plotly', normalized=False):
         """
         Plot the spectrum.
 
@@ -186,15 +226,21 @@ class Spectrum:
             # Plot emission and absorption lines
 
             # OVI, Ly-alpha, NV, OI, CII, SiIV, SiIV/OIV, CIV, HeII
-            # OIII, AlIII, CIII, CII, NeIV, MgII, NeV, NeVI, [OII]
+            # OIII, AlIII, CIII, CII, NeIV, MgII, [OII]
             # [OII], H-delta, H-gamma, [OIII], H-beta, [OIII], [OIII], [OI], [OI]
-            # [FeX], [NII], H-alpha, [NII], [SII], [SII], [FeXI]
+            # [NII], H-alpha, [NII], [SII], [SII]
             emlines = np.array([1033.820, 1215.240, 1240.810, 1305.530, 1335.310, 1397.610, 1399.800, 1549.480, 1640.400,
-                                1665.850, 1857.400, 1908.734, 2326.000, 2439.500, 2799.117, 3346.790, 3426.850, 3727.092,
+                                1665.850, 1857.400, 1908.734, 2326.000, 2439.500, 2799.117, 3727.092,
                                 3729.875, 4102.890, 4341.680, 4364.436, 4862.680, 4960.295, 5008.240, 6300.304, 6363.776,
-                                6374.510, 6549.860, 6564.610, 6585.270, 6718.290, 6732.670, 7891.800])
+                                6549.860, 6564.610, 6585.270, 6718.290, 6732.670])
             for line in emlines:
                 ax.axvline(line, color=emline_color, lw=linewidth, linestyle=linestyle, alpha=0.5)
+            # Ne V, Ne V*, Fe VII, Fe V, Fe V, Ne III (not coronal), Fe V, Fe VII, Fe VI, Fe VII, Fe VI, Fe VII, Fe XIV, Ca V, Fe VI
+            # Ar X, Fe VII, Fe VII*, Fe X, Fe XI
+            clines = np.array([3346.790, 3426.850, 3759, 3839, 3891, 3970, 4181, 4893, 5146, 5159, 5176, 5276, 5303, 5309, 5335,
+                               5533, 5720, 6087, 6374.510, 7891.800])
+            for line in clines:
+                ax.axvline(line, color=cline_color, lw=linewidth*2, linestyle=linestyle, alpha=0.75)
 
             # Ca K, Ca H, Mg1b, Na, CaII, CaII, CaII
             abslines = np.array([3934.777, 3969.588, 5176.700, 5895.600, 8500.3600, 8544.440, 8664.520])
@@ -231,8 +277,12 @@ class Spectrum:
                                 3729.875, 4102.890, 4341.680, 4364.436, 4862.680, 4960.295, 5008.240, 6300.304, 6363.776,
                                 6374.510, 6549.860, 6564.610, 6585.270, 6718.290, 6732.670, 7891.800])
             abslines = np.array([3934.777, 3969.588, 5176.700, 5895.600, 8500.3600, 8544.440, 8664.520])
+            clines = np.array([3346.790, 3426.850, 3759, 3839, 3891, 3970, 4181, 4893, 5146, 5159, 5176, 5276, 5303, 5309, 5335,
+                               5533, 5720, 6087, 6374.510, 7891.800])
             for line in emlines:
                 fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#663399')
+            for line in clines:
+                fig.add_vline(x=line, line_width=2*linewidth, line_dash='dot', line_color='#226666')
             for line in abslines:
                 fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#d1c779')
             if not normalized:
@@ -676,7 +726,7 @@ class Stack(Spectra):
             if log:
                 id = np.log10(id)
             if np.isnan(id):
-                print(f"WARNING: bin_quantity is NaN in {ispec} data!  Ignoring this spectrum")
+                print(f"WARNING: bin_quantity is {id} in {ispec} data!  Ignoring this spectrum")
                 continue
             included = np.append(included, ispec)
             unbinned = np.append(unbinned, id)
@@ -693,6 +743,8 @@ class Stack(Spectra):
             minbin = np.floor(minbin*rating)/rating
             maxbin = np.ceil(maxbin*rating)/rating
             bin_size = np.round(bin_size*rating)/rating
+            if bin_size == 0:
+                bin_size = round_bins
             nbins = -int(-(maxbin-minbin) // bin_size)
 
         binned_spec = {i: np.array([], dtype=np.str) for i in range(nbins)}
@@ -820,16 +872,17 @@ class Stack(Spectra):
                 ticklen=10,
                 title_text=xlabel
             )
-            fig.update_layout(
+            # fig.update_layout(
                 # paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)'
-            )
+                # plot_bgcolor='rgba(0,0,0,0)'
+            # )
             fig.write_html(fname_base+'.html')
 
 
     # Allow the class to be called as a way to perform the stacking
     @utils.timer(name='Stack Procedure')
-    def __call__(self, bin=None, nbins=None, bin_size=None, log=False, round_bins=None, auto_norm_region=True):
+    def __call__(self, bin=None, nbins=None, bin_size=None, log=False, round_bins=None, auto_norm_region=True,
+                 bpt_1=None, bpt_2=None, stack_all_agns=False):
         """
         The main procedure for stacking spectra.  Performs all necessary steps at once:
             1. Convert each spectra to their rest-frame wavelengths using their redshifts.
@@ -852,7 +905,60 @@ class Stack(Spectra):
         self.universal_grid = []
         self.stacked_flux = []
         self.stacked_err = []
-        if bin:
+        if stack_all_agns:
+            if not bpt_1 or not bpt_2:
+                raise ValueError("Must specify BPT ratio keys if stacking all AGNs!")
+
+            # Calculate the statistic to cut by and get the spectra that qualify
+            spectra = np.array([], dtype=str)
+            for i, ispec in enumerate(self):
+                agn = self[ispec].k01_agn_class(bpt_1, bpt_2)
+                if agn:
+                    spectra = np.append(spectra, ispec)
+
+            # Stack only the qualified spectra
+            if len(spectra) == 0:
+                self.universal_grid.append(None)
+                self.stacked_flux.append(None)
+                self.stacked_err.append(None)
+                return
+
+            wave_grid_b, spectra = self.uniform_wave_grid(spectra)
+            self.resample(wave_grid_b, spectra)
+            if auto_norm_region:
+                nr0, nr1 = self.calc_norm_region(wave_grid_b, spectra)
+            else:
+                nr0, nr1 = self.norm_region
+            self.normalize(wave_grid_b, (nr0, nr1), spectra)
+            flux_b, err_b = self.coadd(wave_grid_b, spectra)
+            self.universal_grid.append(wave_grid_b)
+            self.stacked_flux.append(flux_b)
+            self.stacked_err.append(err_b)
+
+        elif bin:
+            if bin == 'agn_frac':
+
+                if not bpt_1 or not bpt_2:
+                    raise ValueError("Must specify BPT ratio keys if binning by AGN fraction!")
+
+                # First find the optimal point to use as a reference point
+                dx = np.zeros(len(self))
+                dy = np.zeros(len(self))
+                for i, ispec in enumerate(self):
+                    dx[i], dy[i] = self[ispec]._calc_agn_dist(bpt_1, bpt_1, ref_point=(0, 0))
+
+                ref_point = (np.nanmax(dx)+1, np.nanmax(dy)+1)
+
+                # Now calculate the AGN fractions using this distance
+                agn_fracs = np.zeros(len(self))
+                for i, ispec in enumerate(self):
+                    agn_fracs[i] = self[ispec].calc_agn_frac(bpt_1, bpt_2, ref_point=ref_point)
+
+                # Normalize so that the largest AGN frac is 1
+                max_frac = np.nanmax(agn_fracs)
+                for ispec in self:
+                    self[ispec].data["agn_frac"] /= max_frac
+
             binned_spectra, bin_counts, bin_edges = self.bin_spectra(bin, bin_size=bin_size, nbins=nbins, log=log,
                                                                      round_bins=round_bins)
             nn = len(binned_spectra)
@@ -1026,7 +1132,8 @@ class Stack(Spectra):
         )
         return stacked_flux, stacked_err
 
-    def plot_stacked(self, fname_base, emline_color="rebeccapurple", absorp_color="darkgoldenrod", backend='plotly'):
+    def plot_stacked(self, fname_base, emline_color="rebeccapurple", absorp_color="darkgoldenrod", cline_color="cyan",
+                     backend='plotly'):
         """
         Plot the stacked spectrum.
 
@@ -1073,11 +1180,20 @@ class Stack(Spectra):
                 # [OII], H-delta, H-gamma, [OIII], H-beta, [OIII], [OIII], [OI], [OI]
                 # [FeX], [NII], H-alpha, [NII], [SII], [SII], [FeXI]
                 emlines = np.array([1033.820, 1215.240, 1240.810, 1305.530, 1335.310, 1397.610, 1399.800, 1549.480, 1640.400,
-                                    1665.850, 1857.400, 1908.734, 2326.000, 2439.500, 2799.117, 3346.790, 3426.850, 3727.092,
+                                    1665.850, 1857.400, 1908.734, 2326.000, 2439.500, 2799.117, 3727.092,
                                     3729.875, 4102.890, 4341.680, 4364.436, 4862.680, 4960.295, 5008.240, 6300.304, 6363.776,
-                                    6374.510, 6549.860, 6564.610, 6585.270, 6718.290, 6732.670, 7891.800])
+                                    6549.860, 6564.610, 6585.270, 6718.290, 6732.670])
+
                 for line in emlines:
                     ax.axvline(line, color=emline_color, lw=linewidth, linestyle=linestyle, alpha=0.5)
+
+                # Ne V, Ne V*, Fe VII, Fe V, Fe V, Ne III (not coronal), Fe V, Fe VII, Fe VI, Fe VII, Fe VI, Fe VII, Fe XIV, Ca V, Fe VI
+                # Ar X, Fe VII, Fe VII*, Fe X, Fe XI
+                clines = np.array(
+                    [3346.790, 3426.850, 3759, 3839, 3891, 3970, 4181, 4893, 5146, 5159, 5176, 5276, 5303, 5309, 5335,
+                     5533, 5720, 6087, 6374.510, 7891.800])
+                for line in clines:
+                    ax.axvline(line, color=cline_color, lw=linewidth * 2, linestyle=linestyle, alpha=0.75)
 
                 # Ca K, Ca H, Mg1b, Na, CaII, CaII, CaII
                 abslines = np.array([3934.777, 3969.588, 5176.700, 5895.600, 8500.3600, 8544.440, 8664.520])
@@ -1107,12 +1223,17 @@ class Stack(Spectra):
                                                            line=dict(color='#60dbbd', width=0), fillcolor='rgba(96, 219, 189, 0.6)',
                                                            fill='tonexty', name='Lower Bound', showlegend=False))
                 emlines = np.array([1033.820, 1215.240, 1240.810, 1305.530, 1335.310, 1397.610, 1399.800, 1549.480, 1640.400,
-                                    1665.850, 1857.400, 1908.734, 2326.000, 2439.500, 2799.117, 3346.790, 3426.850, 3727.092,
+                                    1665.850, 1857.400, 1908.734, 2326.000, 2439.500, 2799.117, 3727.092,
                                     3729.875, 4102.890, 4341.680, 4364.436, 4862.680, 4960.295, 5008.240, 6300.304, 6363.776,
-                                    6374.510, 6549.860, 6564.610, 6585.270, 6718.290, 6732.670, 7891.800])
+                                    6549.860, 6564.610, 6585.270, 6718.290, 6732.670])
+                clines = np.array(
+                    [3346.790, 3426.850, 3759, 3839, 3891, 3970, 4181, 4893, 5146, 5159, 5176, 5276, 5303, 5309, 5335,
+                     5533, 5720, 6087, 6374.510, 7891.800])
                 abslines = np.array([3934.777, 3969.588, 5176.700, 5895.600, 8500.3600, 8544.440, 8664.520])
                 for line in emlines:
                     fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#663399')
+                for line in clines:
+                    fig.add_vline(x=line, line_width=2*linewidth, line_dash='dot', line_color='#226666')
                 for line in abslines:
                     fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#d1c779')
                 title = 'Stacked Spectra'
@@ -1194,6 +1315,56 @@ class Stack(Spectra):
                 fig.update_yaxes(
                     type="log",
                 )
+            fig.write_html(fname)
+
+    def plot_agn(self, fname_base, bpt_x, bpt_y, bpt_xerr=None, bpt_yerr=None, labels=None, backend='plotly'):
+        format = '.html' if backend == 'plotly' else '.pdf'
+        fname = fname_base + format
+        data = np.array([(self[i].data[bpt_x], self[i].data[bpt_y], self[i].data['agn_frac']) for i in range(len(self))])
+        x = data[:, 0]
+        y = data[:, 1]
+        z = data[:, 2]
+        xerr = yerr = None
+        if bpt_xerr:
+            xerr = np.array([self[i].data[bpt_xerr] for i in range(len(self))])
+        if bpt_yerr:
+            yerr = np.array([self[i].data[bpt_yerr] for i in range(len(self))])
+        if labels:
+            xl, yl = labels
+        else:
+            xl, yl = bpt_x, bpt_y
+        if backend == 'pyplot':
+            fig, ax = plt.subplots()
+            ax.set_xlabel(xl)
+            ax.set_ylabel(yl)
+            scp = ax.errorbar(x, y, xerr=xerr, yerr=yerr, fmt='.', c=z, cmap='coolwarm')
+            fig.colorbar(scp, ax=ax, label='AGN Fraction')
+            fig.savefig(fname, dpi=300, bbox_inches='tight')
+        elif backend == 'plotly':
+            fig = plotly.graph_objects.Figure(
+                data=plotly.graph_objects.Scatter(
+                    x=x, y=y, mode='markers',
+                    error_x=dict(type='data', array=xerr, visible=True),
+                    error_y=dict(type='data', array=yerr, visible=True),
+                    marker=dict(size=4, color=z, colorscale='bluered', showscale=True)
+                )
+            )
+            k01_x = np.linspace(np.nanmin(x), np.min([np.nanmax(x), 0]), 100)
+            k01_y = 0.61/(k01_x-0.47) + 1.19
+            fig.add_trace(plotly.graph_objects.Scatter(x=k01_x, y=k01_y, line=dict(color='black', width=.5, dash='dash'),
+                                                       name='Kewley et al. 2001 Cutoff', showlegend=False))
+            fig.update_layout(
+                xaxis_title=xl,
+                yaxis_title=yl
+            )
+            fig.update_yaxes(
+                range=(np.nanmin(y)-0.05, np.nanmax(y)+0.05),
+                constrain='domain'
+            )
+            fig.update_xaxes(
+                range=(np.nanmin(x)-0.05, np.nanmax(x)+0.05),
+                constrain='domain'
+            )
             fig.write_html(fname)
 
     def save_json(self, filepath):

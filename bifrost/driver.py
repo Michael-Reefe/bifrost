@@ -40,8 +40,8 @@ def driver(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=Fals
     :param name_by: str
         "folder" or "file" : how to specify object keys, based on the name of the fits file or the folder that the fits
         file is in.
-    :param properties_tbl: str
-        A path to a table file (.csv, .tbl, .xlsx, .txt, ...) containing properties of the spectra that are being loaded
+    :param properties_tbl: str, iterable
+        A path (or paths) to a table file (.csv, .tbl, .xlsx, .txt, ...) containing properties of the spectra that are being loaded
         in separately.  The file MUST be in the correct format:
             - The header must be the first uncommented row in the file
             - Comments should be marked with properties_comment (Default: "#")
@@ -108,12 +108,24 @@ def driver(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=Fals
 
     if properties_tbl:
         print('Loading in table data...')
-        tbl_data = pd.read_csv(properties_tbl, delimiter=properties_sep, comment=properties_comment,
-                               skipinitialspace=True, header=0, index_col=properties_name_col)
-        for name in tqdm.tqdm(tbl_data.index):
-            assert name in stack.keys(), f"ERROR: {name} not found in Stack!"
-            for tbl_col in tbl_data.columns:
-                stack[name].data[tbl_col] = tbl_data[tbl_col][name]
+        if type(properties_tbl) is str:
+            properties_tbl = [properties_tbl]
+        if type(properties_sep) is str:
+            properties_sep = [properties_sep] * len(properties_tbl)
+        if type(properties_comment) is str:
+            properties_comment = [properties_comment] * len(properties_tbl)
+        if type(properties_name_col) is int:
+            properties_name_col = [properties_name_col] * len(properties_tbl)
+        for tbl, sep, comm, name in zip(properties_tbl, properties_sep, properties_comment, properties_name_col):
+            tbl_data = pd.read_csv(tbl, delimiter=sep, comment=comm,
+                                   skipinitialspace=True, header=0, index_col=name)
+            for namei in tqdm.tqdm(tbl_data.index):
+                # assert namei in stack.keys(), f"ERROR: {namei} not found in Stack!"
+                if namei not in stack:
+                    print(f"WARNING: {namei} not found in stack!")
+                    continue
+                for tbl_col in tbl_data.columns:
+                    stack[namei].data[tbl_col] = tbl_data[tbl_col][namei]
 
     stack(bin=bin_quant, nbins=nbins, bin_size=bin_size, log=bin_log)
     if plot_spec:
