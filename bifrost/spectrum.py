@@ -175,7 +175,7 @@ class Spectrum:
             True if object is an AGN, otherwise False.
         """
         k_line = 0.61/(self.data[bpt_x]-0.47)+1.19
-        agn = self.data[bpt_y] > k_line or self.data[bpt_x] > 0
+        agn = self.data[bpt_y] > k_line or self.data[bpt_x] >= 0.47
         self.data["agn_class"] = agn
         return self.data["agn_class"]
 
@@ -1333,12 +1333,16 @@ class Stack(Spectra):
             xl, yl = labels
         else:
             xl, yl = bpt_x, bpt_y
+        k01_x = np.linspace(np.nanmin(x), np.min([np.nanmax(x), 0.469]), 100)
+        k01_y = 0.61 / (k01_x - 0.47) + 1.19
         if backend == 'pyplot':
             fig, ax = plt.subplots()
             ax.set_xlabel(xl)
             ax.set_ylabel(yl)
             scp = ax.errorbar(x, y, xerr=xerr, yerr=yerr, fmt='.', c=z, cmap='coolwarm')
             fig.colorbar(scp, ax=ax, label='AGN Fraction')
+            ax.plot(k01_x, k01_y, 'k--', lw=.5, label='Kewley et al. 2001 Cutoff')
+            ax.legend()
             fig.savefig(fname, dpi=300, bbox_inches='tight')
         elif backend == 'plotly':
             fig = plotly.graph_objects.Figure(
@@ -1346,11 +1350,10 @@ class Stack(Spectra):
                     x=x, y=y, mode='markers',
                     error_x=dict(type='data', array=xerr, visible=True),
                     error_y=dict(type='data', array=yerr, visible=True),
-                    marker=dict(size=4, color=z, colorscale='bluered', showscale=True)
+                    marker=dict(size=4, color=z, colorscale='bluered', showscale=True),
+                    showlegend=False
                 )
             )
-            k01_x = np.linspace(np.nanmin(x), np.min([np.nanmax(x), 0]), 100)
-            k01_y = 0.61/(k01_x-0.47) + 1.19
             fig.add_trace(plotly.graph_objects.Scatter(x=k01_x, y=k01_y, line=dict(color='black', width=.5, dash='dash'),
                                                        name='Kewley et al. 2001 Cutoff', showlegend=False))
             fig.update_layout(
