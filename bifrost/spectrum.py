@@ -16,6 +16,8 @@ import matplotlib.pyplot as plt
 import plotly.subplots
 import plotly.graph_objects
 
+import scipy.optimize
+
 import astropy.coordinates
 import astropy.time
 import astropy.io.fits
@@ -142,7 +144,7 @@ class Spectrum:
     def _calc_agn_dist(self, bpt_1, bpt_2, ref_point):
         assert bpt_1 in self.data.keys() and bpt_2 in self.data.keys()
         # Calculate x and y distance between this object and the reference point in the BPT plane
-        return ref_point[0] - self.data[bpt_1], ref_point[1] - self.data[bpt_2]
+        return self.data[bpt_1] - ref_point[0], self.data[bpt_2] - ref_point[1]
 
     def calc_agn_frac(self, bpt_1, bpt_2, ref_point):
         """
@@ -159,7 +161,7 @@ class Spectrum:
         """
         dx, dy = self._calc_agn_dist(bpt_1, bpt_2, ref_point)
         d = np.hypot(dx, dy)
-        # AGN fraction = 1 / distance
+        # AGN fraction = 1 / distance^2
         self.data["agn_frac"] = 1/d
         return self.data["agn_frac"]
 
@@ -276,13 +278,19 @@ class Spectrum:
                                 1665.850, 1857.400, 1908.734, 2326.000, 2439.500, 2799.117, 3346.790, 3426.850, 3727.092,
                                 3729.875, 4102.890, 4341.680, 4364.436, 4862.680, 4960.295, 5008.240, 6300.304, 6363.776,
                                 6374.510, 6549.860, 6564.610, 6585.270, 6718.290, 6732.670, 7891.800])
-            abslines = np.array([3934.777, 3969.588, 5176.700, 5895.600, 8500.3600, 8544.440, 8664.520])
             clines = np.array([3346.790, 3426.850, 3759, 3839, 3891, 3970, 4181, 4893, 5146, 5159, 5176, 5276, 5303, 5309, 5335,
                                5533, 5720, 6087, 6374.510, 7891.800])
+            cline_names = np.array(
+                ['[Ne V]', '[Ne V]*', '[Fe VII]', '[Fe V]', '[Fe V]', '[Ne III]', '[Fe V]', '[Fe VII]', '[Fe VI]',
+                 '[Fe VII]', '[Fe VI]', '[Fe VII]', '[Fe XIV]', '[Ca V]', '[Fe VI]', '[Ar X]', '[Fe VII]', '[Fe VII]*',
+                 '[Fe X]', '[Fe XI]'], dtype=str
+            )
+            abslines = np.array([3934.777, 3969.588, 5176.700, 5895.600, 8500.3600, 8544.440, 8664.520])
             for line in emlines:
                 fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#663399')
-            for line in clines:
-                fig.add_vline(x=line, line_width=2*linewidth, line_dash='dot', line_color='#226666')
+            for line, name in zip(clines, cline_names):
+                fig.add_vline(x=line, line_width=2 * linewidth, line_dash='dot', line_color='#226666',
+                              annotation_text=name, annotation_position='top right', annotation_font_size=12)
             for line in abslines:
                 fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#d1c779')
             if not normalized:
@@ -628,6 +636,7 @@ class Stack(Spectra):
         self.bin_counts = None
         self.bin_edges = None
         self.bin_log = False
+        self.agn_ref_pt = None
         super().__init__()
 
     def calc_norm_region(self, wave_grid, binned_spec=None):
@@ -754,7 +763,7 @@ class Stack(Spectra):
         bin_midpts = minbin + (np.arange(0, nbins, 1) + 0.5)*bin_size
         for i in range(len(included)):
             indx = int((unbinned[i] - minbin) / bin_size)
-            if unbinned[i] == maxbin:
+            if indx == len(binned_spec):
                 indx -= 1
             binned_spec[indx] = np.append(binned_spec[indx], included[i])
             bin_counts[indx] += 1
@@ -882,7 +891,7 @@ class Stack(Spectra):
     # Allow the class to be called as a way to perform the stacking
     @utils.timer(name='Stack Procedure')
     def __call__(self, bin=None, nbins=None, bin_size=None, log=False, round_bins=None, auto_norm_region=True,
-                 bpt_1=None, bpt_2=None, stack_all_agns=False):
+                 bpt_1=None, bpt_2=None, hbin_target=3, stack_all_agns=False):
         """
         The main procedure for stacking spectra.  Performs all necessary steps at once:
             1. Convert each spectra to their rest-frame wavelengths using their redshifts.
@@ -945,19 +954,52 @@ class Stack(Spectra):
                 dx = np.zeros(len(self))
                 dy = np.zeros(len(self))
                 for i, ispec in enumerate(self):
-                    dx[i], dy[i] = self[ispec]._calc_agn_dist(bpt_1, bpt_1, ref_point=(0, 0))
+                    dx[i], dy[i] = self[ispec]._calc_agn_dist(bpt_1, bpt_2, ref_point=(0, 0))
 
-                ref_point = (np.nanmax(dx)+1, np.nanmax(dy)+1)
+                # Solve for the optimal reference point so the highest bin has at least 3 spectra
+                def num_in_highest_bin(ref_point_shift, target_num, bin_size=None, nbins=None, round_bins=None):
+                    ref_point = (np.nanmax(dx), np.nanmax(dy)) + ref_point_shift
+                    agn_fracs = np.zeros(len(self))
+                    # Now calculate the AGN fractions using this distance
+                    for i, ispec in enumerate(self):
+                        agn_fracs[i] = self[ispec].calc_agn_frac(bpt_1, bpt_2, ref_point=ref_point)
+                    # Normalize so that the largest AGN frac is 1
+                    max_frac = np.nanmax(agn_fracs)
+                    agn_fracs /= max_frac
 
-                # Now calculate the AGN fractions using this distance
+                    minbin = np.nanmin(agn_fracs)
+                    maxbin = 1
+                    if nbins and not bin_size:
+                        bin_size = (maxbin - minbin) / nbins
+                    if round_bins:
+                        rating = 1 / round_bins
+                        bin_size = np.round(bin_size * rating) / rating
+                        if bin_size == 0:
+                            bin_size = round_bins
+                    counts = len(np.where(agn_fracs >= 1-bin_size)[0])
+
+                    print('Current number in highest bin: %03d' % counts, end='\r', flush=True)
+                    if counts > target_num:
+                        return 0
+                    else:
+                        return -1 * counts
+
+                # USE POWELL METHOD
+                print('Optimizing AGN fraction reference point...')
+                min_res = scipy.optimize.minimize(num_in_highest_bin, 0, args=(hbin_target, bin_size, nbins, round_bins), method='Powell')
+                shift = min_res.x
+                print('\n')
+
+                # Calculate final AGN fractions from the optimized reference point
+                ref_point = (np.nanmax(dx), np.nanmax(dy)) + shift
                 agn_fracs = np.zeros(len(self))
                 for i, ispec in enumerate(self):
                     agn_fracs[i] = self[ispec].calc_agn_frac(bpt_1, bpt_2, ref_point=ref_point)
-
-                # Normalize so that the largest AGN frac is 1
                 max_frac = np.nanmax(agn_fracs)
-                for ispec in self:
-                    self[ispec].data["agn_frac"] /= max_frac
+                for i, ispec in enumerate(self):
+                    agn_fracs[i] /= max_frac
+                    self[ispec].data["agn_frac"] = agn_fracs[i]
+                self.agn_ref_pt = ref_point
 
             binned_spectra, bin_counts, bin_edges = self.bin_spectra(bin, bin_size=bin_size, nbins=nbins, log=log,
                                                                      round_bins=round_bins)
@@ -1026,7 +1068,7 @@ class Stack(Spectra):
         binned_indices = np.array([self.get_spec_index(name) for name in all_names], dtype=np.int)
         wave = self.to_numpy('wave')['wave'][binned_indices]
         wmin = -1
-        wmax = 1e10
+        wmax = 1e100
         removed_names = np.array([], dtype=np.int)
         for i, wi in enumerate(wave):
             remove = False
@@ -1130,6 +1172,7 @@ class Stack(Spectra):
         stacked_err = np.sqrt(
             np.nansum((flux - stacked_flux)**2*weights) / ((M-1)/M * np.nansum(weights))
         )
+        # stacked_err = np.sqrt(1/np.nansum(weights))
         return stacked_flux, stacked_err
 
     def plot_stacked(self, fname_base, emline_color="rebeccapurple", absorp_color="darkgoldenrod", cline_color="cyan",
@@ -1229,11 +1272,17 @@ class Stack(Spectra):
                 clines = np.array(
                     [3346.790, 3426.850, 3759, 3839, 3891, 3970, 4181, 4893, 5146, 5159, 5176, 5276, 5303, 5309, 5335,
                      5533, 5720, 6087, 6374.510, 7891.800])
+                cline_names = np.array(
+                    ['[Ne V]', '[Ne V]*', '[Fe VII]', '[Fe V]', '[Fe V]', '[Ne III]', '[Fe V]', '[Fe VII]', '[Fe VI]',
+                     '[Fe VII]', '[Fe VI]', '[Fe VII]', '[Fe XIV]', '[Ca V]', '[Fe VI]', '[Ar X]', '[Fe VII]', '[Fe VII]*',
+                     '[Fe X]', '[Fe XI]'], dtype=str
+                )
                 abslines = np.array([3934.777, 3969.588, 5176.700, 5895.600, 8500.3600, 8544.440, 8664.520])
                 for line in emlines:
                     fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#663399')
-                for line in clines:
-                    fig.add_vline(x=line, line_width=2*linewidth, line_dash='dot', line_color='#226666')
+                for line, name in zip(clines, cline_names):
+                    fig.add_vline(x=line, line_width=2*linewidth, line_dash='dot', line_color='#226666',
+                                  annotation_text=name, annotation_position='top right', annotation_font_size=12)
                 for line in abslines:
                     fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#d1c779')
                 title = 'Stacked Spectra'
@@ -1351,14 +1400,15 @@ class Stack(Spectra):
                     error_x=dict(type='data', array=xerr, visible=True),
                     error_y=dict(type='data', array=yerr, visible=True),
                     marker=dict(size=4, color=z, colorscale='bluered', showscale=True),
-                    showlegend=False
+                    showlegend=False, hovertemplate='(x: %{x:.5f}, y: %{y:.5f}), <br> AGN_frac = %{marker.color:.5f}'
                 )
             )
             fig.add_trace(plotly.graph_objects.Scatter(x=k01_x, y=k01_y, line=dict(color='black', width=.5, dash='dash'),
                                                        name='Kewley et al. 2001 Cutoff', showlegend=False))
             fig.update_layout(
                 xaxis_title=xl,
-                yaxis_title=yl
+                yaxis_title=yl,
+                title='Reference point: ({:.5f},{:.5f})'.format(*self.agn_ref_pt)
             )
             fig.update_yaxes(
                 range=(np.nanmin(y)-0.05, np.nanmax(y)+0.05),
