@@ -1239,7 +1239,7 @@ class Stack(Spectra):
                 good = np.isfinite(self[ispec].wave) & np.isfinite(self[ispec].flux) & np.isfinite(self[ispec].error)
                 region = (line-dw < self[ispec].wave) & (self[ispec].wave < line+dw)
                 bad = ~np.isfinite(self[ispec].error) | ~np.isfinite(self[ispec].flux) | ~np.isfinite(self[ispec].wave)
-                if len(np.where(bad & region)[0]) >= 10:
+                if len(np.where(bad & region)[0]) >= 3:
                     print(f"WARNING: {ispec} spectrum has undefined datapoints in the line region!  "
                           f"Cannot calculate relative line flux.")
                     continue
