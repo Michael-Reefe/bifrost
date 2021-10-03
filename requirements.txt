@@ -7,4 +7,5 @@ plotly>=4.14.3
 astropy>=4.2.1
 astroquery>=0.4.2
 spectres>=2.1.1
+scipy>=1.7.0
 joblib>=1.0.1
