@@ -322,6 +322,7 @@ class Spectrum:
                 constrain='domain'
             )
             fig.write_html(fname)
+            # fig.write_image(fname.replace('.html', '.pdf'))
 
     def save_pickle(self):
         """
@@ -897,6 +898,7 @@ class Stack(Spectra):
                 # plot_bgcolor='rgba(0,0,0,0)'
             # )
             fig.write_html(fname_base+'.html')
+            # fig.write_image(fname_base+'.pdf')
 
     def kewley_agn_class(self, bpt_1, bpt_2):
         for i, ispec in enumerate(self):
@@ -1225,7 +1227,7 @@ class Stack(Spectra):
         self._renorm_stack((line-norm_dw, line+norm_dw))
         for i in range(len(self.universal_grid)):
             print(f"BIN {i+1} of {len(self.universal_grid)}...")
-            cspline_stack = scipy.interpolate.CubicSpline(self.universal_grid[i], self.stacked_flux[i]+self.stacked_err[i]-1,
+            cspline_stack = scipy.interpolate.CubicSpline(self.universal_grid[i], self.stacked_flux[i]-1,
                                                           extrapolate=False)
 
             baseline, err = scipy.integrate.quad(cspline_stack.__call__, line-dw, line+dw)
@@ -1380,6 +1382,7 @@ class Stack(Spectra):
                     constrain='domain'
                 )
                 fig.write_html(fname)
+                # fig.write_image(fname.replace('.html', '.pdf'))
 
     def plot_spectra(self, fname_root, spectra='all', range=None, backend='plotly'):
         """
@@ -1445,6 +1448,7 @@ class Stack(Spectra):
                     type="log",
                 )
             fig.write_html(fname)
+            # fig.write_image(fname.replace('.html', '.pdf'))
 
     def plot_agn(self, fname_base, bpt_x, bpt_y, bpt_xerr=None, bpt_yerr=None, labels=None, backend='plotly'):
         format = '.html' if backend == 'plotly' else '.pdf'
@@ -1499,10 +1503,12 @@ class Stack(Spectra):
                 constrain='domain'
             )
             fig.write_html(fname)
+            # fig.write_image(fname.replace('.html', '.pdf'))
 
     def plot_line_flux_ratios(self, fluxr_dict, line=6374, dw=10, ratio_target=1, plot_backend='plotly', path='',
                               agn_diagnostics=False):
         self.line_flux_diagnostics(fluxr_dict, line, dw, plot_backend, path)
+        ss = []
         for i in range(len(fluxr_dict)):
             ratios = np.array([fluxr_dict[i][key][0] for key in fluxr_dict[i] if key != 'stack'])
             specnames = np.array([key for key in fluxr_dict[i] if key != 'stack'], dtype='<U19')
@@ -1515,8 +1521,9 @@ class Stack(Spectra):
                 kw = np.where((kew == False) & (ratios >= 1))[0]
                 print(f'Of these, {len(kw)} did NOT satisfy the Kewley et al. 2001 criteria: ')
                 print(specnames[kw])
-
+            ss.append(specnames[w])
             self.plot_spectra(os.path.join(path, 'spectra'), specnames[w], range=self.norm_region, backend='pyplot')
+        return ss
 
     def line_flux_diagnostics(self, fluxr_dict, line=6374, dw=10, plot_backend='pyplot', path=''):
         # 10^-17 erg s^-1 cm^-2 (not per anstrom after integration)
@@ -1627,7 +1634,7 @@ class Stack(Spectra):
                                                            [{}, {}, {}]],
                                                     subplot_titles=['Stacked line flux = %.3f &times; 10<sup>-17</sup> erg s<sup>-1</sup> cm<sup>-2</sup>' % stack_fluxes[k],
                                                                     maxs[0, k], maxs[1, k], mins[0, k], mins[1, k], 'Stack'])
-                fig.add_trace(plotly.graph_objects.Histogram(x=ratios[k], xbins=dict(start=0, end=3.2, size=0.2)), row=1, col=1)
+                fig.add_trace(plotly.graph_objects.Histogram(x=ratios[k], xbins=dict(start=0, end=3, size=0.2)), row=1, col=1)
                 fig.update_traces(marker_color='rgb(158,202,225)', marker_line_color='rgb(8,48,107)',
                                   marker_line_width=0.0, opacity=0.8, row=1, col=1)
                 fig.update_layout(
@@ -1719,6 +1726,7 @@ class Stack(Spectra):
                                   line_width=0, layer='below')
 
                 fig.write_html(path+os.sep+'line_flux_ratios_'+str(k)+'.html')
+                # fig.write_image(path+os.sep+'line_flux_ratios_'+str(k)+'.pdf')
         else:
             raise NotImplementedError
 
