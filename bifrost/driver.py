@@ -13,8 +13,7 @@ from bifrost import spectrum, utils, filters
 
 def driver(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=False, plot_backend='plotly',
          plot_spec=None, limits=None, _filters=None, name_by='folder', properties_tbl=None, properties_comment='#',
-         properties_sep=',', properties_name_col=0, bin_quant=None, nbins=None, bin_size=None, bin_log=False,
-         hist_log=False):
+         properties_sep=',', properties_name_col=0):
     """
     The main driver for the stacking code.
 
@@ -54,16 +53,6 @@ def driver(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=Fals
         Comment character for the properties_tbl file.  Default: "#"
     :param properties_name_col: int
         Index of the column that speicifies object name in the properties_tbl file.  Default: 0.
-    :param bin_quant: str
-        A quantity to bin the data by.
-    :param nbins: int
-        Number of bins.  Cannot be specified simultaneously with bin_size.
-    :param bin_size: float
-        The size of each bin.  Cannot be specified simultaneously with nbins.
-    :param bin_log: bool
-        Whether or not to take the log of bin_quant before binning.
-    :param hist_log: bool
-        Whether or not to make the y-axis of the binned histogram logarithmic.
     :return stack: Stack
         The Stack object.
     """
@@ -121,18 +110,95 @@ def driver(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=Fals
                                    skipinitialspace=True, header=0, index_col=name)
             for namei in tqdm.tqdm(tbl_data.index):
                 # assert namei in stack.keys(), f"ERROR: {namei} not found in Stack!"
-                if namei not in stack:
+                if str(namei) not in stack:
                     print(f"WARNING: {namei} not found in stack!")
                     continue
                 for tbl_col in tbl_data.columns:
-                    stack[namei].data[tbl_col] = tbl_data[tbl_col][namei]
+                    stack[str(namei)].data[tbl_col] = tbl_data[tbl_col][namei]
 
-    stack(bin=bin_quant, nbins=nbins, bin_size=bin_size, log=bin_log)
     if plot_spec:
         stack.plot_spectra(out_path, spectra=plot_spec, backend=plot_backend)
-    stack.plot_stacked(out_path+'stacked_plot', backend=plot_backend)
-    if bin_quant:
-        stack.plot_hist(out_path+'binned_plot', plot_log=hist_log, backend=plot_backend)
+    if save_pickle:
+        stack.save_pickle(out_path+'stacked_data.pkl')
+    if save_json:
+        stack.save_json(out_path+'stacked_data.json')
+
+    return stack
+
+
+def sim_driver(line, size=10_000, wave_range=(-20, 20), rv='random', rv_lim=(-100, 100), vsini='random',
+               vsini_lim=(0, 500), noise_std='random', noise_std_lim=(0.1, 1),
+               amplitudes=None, widths=None,
+               out_path=None, n_jobs=-1, save_pickle=True, save_json=False, plot_backend='plotly',
+               plot_spec=None, _filters=None, seeds=None):
+    """
+    The main driver for the stacking code.
+
+    :param line: float
+        Wavelength of the line to generate simulated spectra for.
+    :param size: int
+        The number of randomized simulated spectra to generate and stack.
+    :param wave_range: tuple
+        Range of wavelengths around the line to generate spectra over.
+    :param rv_lim: tuple
+        Limits on randomized radial velocities of spectra, in km/s.
+    :param vsini_lim: tuple
+        Limits on randomized rotational velocities of spectra, in km/s.
+    :param snr_lim: tuple
+        Limits on randomized SNRs of spectra.
+    :param out_path: str
+        The output path to save output plots and pickles/jsons to.  Default is "data.stacked.YYYYMMDD_HHMMSS"
+    :param n_jobs: int
+        The number of jobs to run in parallel when reading in fits files.  Default is -1, meaning
+        as many jobs as are allowed to run in parallel.
+    :param save_pickle: bool
+        Whether or not to save the Stack object as a pickle file.  Default is true.
+    :param save_json: bool
+        Whether or not to save the Stack object as a json file.  Default is false.
+    :param plot_backend: str
+        May be 'pyplot' to use pyplot or 'plotly' to use plotly for plotting.  Default is 'plotly'.
+    :param plot_spec: str, iterable
+        Which spectra to plot individually.  Default is None, which doesn't plot any.
+    :param _filters: str, iterable
+        Filter objects to be applied to the Stack.
+    :return stack: Stack
+        The Stack object.
+    """
+    # Create output paths
+    if not out_path:
+        out_path = 'data.stacked.' + utils.gen_datestr(True)
+    if not os.path.exists(out_path):
+        os.makedirs(out_path)
+    out_path += os.sep
+
+    # Configure filter objects
+    filter_list = []
+    if not _filters:
+        _filters = []
+    if type(_filters) is str:
+        _filters = [_filters]
+    for _filter in _filters:
+        filter_list.append(filters.Filter.from_str(_filter))
+    stack = spectrum.Stack(filters=filter_list)
+
+    def make_spec(A, sigma, seed):
+        ispec = spectrum.Spectrum.simulated(line, wave_range, rv, rv_lim, vsini, vsini_lim, noise_std, noise_std_lim,
+                                            A=A, sigma=sigma, seed=seed)
+        return ispec
+
+    print('Generating spectra...')
+    if amplitudes is None:
+        amplitudes = np.array([1] * size)
+    if widths is None:
+        widths = np.array([0.1] * size)
+    if seeds is None:
+        seeds = [None] * size
+    specs = Parallel(n_jobs=n_jobs)(delayed(make_spec)(ai, wi, si) for ai, wi, si in tqdm.tqdm(zip(amplitudes, widths, seeds)))
+    for ispec in specs:
+        stack.add_spec(ispec)
+
+    if plot_spec:
+        stack.plot_spectra(out_path, spectra=plot_spec, backend=plot_backend)
     if save_pickle:
         stack.save_pickle(out_path+'stacked_data.pkl')
     if save_json:

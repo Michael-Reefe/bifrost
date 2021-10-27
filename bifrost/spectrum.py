@@ -29,18 +29,20 @@ import astropy.constants as c
 import astropy.convolution
 
 import astroquery.irsa_dust
+from PyAstronomy.pyasl import fastRotBroad
 # import spectres
 
 # Bifrost packages
+import bifrost.maths as maths
 import bifrost.utils as utils
 import bifrost.filters as bfilters
 
 
 class Spectrum:
 
-    __slots__ = ['wave', 'flux', 'error', 'redshift', 'ra', 'dec', 'ebv', 'name', 'output_path', '_corrected', 'data']
+    __slots__ = ['wave', 'flux', 'error', 'redshift', 'velocity', 'ra', 'dec', 'ebv', 'name', 'output_path', '_corrected', 'data']
 
-    def __init__(self, wave, flux, error, redshift=None, ra=None, dec=None, ebv=None, name='Generic', output_path=None, **data):
+    def __init__(self, wave, flux, error, redshift=None, velocity=None, ra=None, dec=None, ebv=None, name='Generic', output_path=None, **data):
         """
         A class containing data and attributes for a single spectrum of an astronomical object.
 
@@ -52,10 +54,12 @@ class Spectrum:
         :param error: np.ndarray
             Array of the error associated with the observed flux, also in units of 10^-17 erg cm^-2 s^-1 angstrom^-1.
         :param redshift: float
-            Redshift of the object in units of c.
+            Redshift of the object in dimensionless units.
             ***IMPORTANT***
             If none is provided, it is assumed the given wavelength is already corrected to be in the rest frame of the
             source.
+        :param velocity: float
+            Radial velocity of the object in km/s.  An alternative that can be used to calculate the redshift if z is not known.
         :param ra: float
             Right ascension in hours.
         :param dec: float
@@ -79,6 +83,7 @@ class Spectrum:
         self.error = error
         # Redshift in units of c
         self.redshift = redshift
+        self.velocity = velocity
         # Coordinates
         self.ra = ra
         self.dec = dec
@@ -127,10 +132,21 @@ class Spectrum:
         """
         if not self._corrected:
             if self.redshift:
-                self.wave = utils.calc_rest_frame(self.wave, self.redshift)
+                self.wave = maths.cosmological_redshift(self.wave, self.redshift)
+            elif self.velocity:
+                self.redshift = maths.calc_redshift_sqrt(self.velocity)
+                self.wave = maths.cosmological_redshift(self.wave, self.redshift)
             if self.ebv:
-                self.flux = utils.correct_extinction(self.wave, self.flux, self.ebv, r_v)
+                self.flux = maths.correct_extinction(self.wave, self.flux, self.ebv, r_v)
             self._corrected = True
+
+    def calc_snr(self):
+        if 'snr' not in self.data:
+            self.data['snr'] = 1 / np.mean(self.error[np.where(np.isfinite(self.error))[0]])
+
+    def calc_line_snr(self, wave_range, key):
+        good = np.where(np.isfinite(self.error) & (wave_range[0] < self.wave) & (self.wave < wave_range[1]))[0]
+        self.data[key] = 1 / np.mean(self.error[good])
 
     @property
     def corrected(self):
@@ -185,7 +201,7 @@ class Spectrum:
         return self.data["agn_class"]
 
     def plot(self, convolve_width=3, emline_color="rebeccapurple", absorp_color="darkgoldenrod", cline_color="cyan",
-             overwrite=False, fname=None, backend='plotly', range=None, normalized=False):
+             overwrite=False, fname=None, backend='plotly', range=None, ylim=None, normalized=False, title_text=None):
         """
         Plot the spectrum.
 
@@ -195,15 +211,23 @@ class Spectrum:
             If backend is pyplot, this specifies the color of emission lines plotted.  Default is 'rebeccapurple'.
         :param absorp_color: optional, str
             If backend is pyplot, this specifies the color of absorption lines plotted.  Default is 'darkgoldenrod'.
+        :param cline_color: optional, str
+            If backend is pyplot, this specifies the color of coronal lines plotted.  Default is 'cyan'.
         :param overwrite: optional, bool
             If true, overwrites the file if it already exists.  Otherwise it is not replotted.  Default is false.
         :param fname: optional, str
             The path and file name to save the plot to.
         :param backend: optional, str
             May be 'pyplot' to use the pyplot module or 'plotly' to use the plotly module for plotting.  Default is 'plotly'.
+        :param range: optional, tuple
+            Limits on the x-data between two wavelengths.
+        :param ylim: optional, tuple
+            Limits on the y-data between two fluxes.
         :param normalized: optional, bool
             If true, the y axis units are displayed as "normalized".  Otherwise, they are displayed as "10^-17 erg cm^-2 s^-1 angstrom^-1".
             Default is false.
+        :param title_text: optional, str
+            Text to append to the title of the plot.
         :return None:
         """
         # Make sure corrections have been applied
@@ -217,6 +241,8 @@ class Spectrum:
         kernel = astropy.convolution.Box1DKernel(convolve_width)
         spectrum = astropy.convolution.convolve(self.flux, kernel)
         error = astropy.convolution.convolve(self.error, kernel)
+        # spectrum = self.flux
+        # error = self.error
         spectrum[spectrum<0.] = 0.
         error[error<0.] = 0.
         if range:
@@ -266,10 +292,16 @@ class Spectrum:
                 ax.set_ylabel(r'$f_\lambda$ ($10^{-17}$ erg cm$^{-2}$ s$^{-1}$ $\rm{\AA}^{-1}$)', fontsize=fontsize)
             else:
                 ax.set_ylabel(r'$f_\lambda$ (normalized)', fontsize=fontsize)
-            ax.set_title('%s, $z=%.3f$' % (self.name, self.redshift), fontsize=fontsize)
+            title = '%s, $z=%.5f$' % (self.name, self.redshift)
+            if title_text:
+                title += ', ' + title_text
+            ax.set_title(title, fontsize=fontsize)
             ax.tick_params(axis='both', labelsize=fontsize-2)
             ax.set_xlim(np.nanmin(wave), np.nanmax(wave))
-            ax.set_ylim(0., np.nanmax(spectrum))
+            if ylim:
+                ax.set_ylim(ylim)
+            else:
+                ax.set_ylim(0., np.nanmax(spectrum))
 
             fig.savefig(fname, dpi=300, bbox_inches='tight')
             plt.close()
@@ -307,10 +339,13 @@ class Spectrum:
                 y_title = 'f<sub>&#955;</sub> (10<sup>-17</sup> erg cm<sup>-2</sup> s<sup>-1</sup> &#8491;<sup>-1</sup>)'
             else:
                 y_title = 'f<sub>&#955;</sub> (normalized)'
+            title = '%s, z=%.5f' % (self.name, self.redshift)
+            if title_text:
+                title += ', ' + title_text
             fig.update_layout(
                 yaxis_title=y_title,
                 xaxis_title='&#955;<sub>rest</sub> (&#8491;)',
-                title='%s, z=%.3f' % (self.name, self.redshift),
+                title=title,
                 hovermode='x'
             )
             fig.update_xaxes(
@@ -318,7 +353,7 @@ class Spectrum:
                 constrain='domain'
             )
             fig.update_yaxes(
-                range=(0, np.nanmax(spectrum)+.3),
+                range=(0, np.nanmax(spectrum)+.3) if not ylim else ylim,
                 constrain='domain'
             )
             fig.write_html(fname)
@@ -435,6 +470,76 @@ class Spectrum:
 
         return cls(wave, flux, error, redshift=z, ra=ra/15, dec=dec, ebv=ebv, name=name, **data_dict)
 
+    @classmethod
+    def simulated(cls, true_line, wave_range=(-20, 20), rv='random', rv_lim=(-100, 100),
+                  vsini='random', vsini_lim=(0, 500), noise_std='random', noise_std_lim=(0.1, 1), A=1, sigma=0.1,
+                  name='auto', seed=None):
+        """
+        Create a simulated spectrum object.
+
+        :param true_line: float
+            The wavelength of the emission line to model, in anstroms.
+        :param wave_range: tuple
+            Range of wavelengths in anstroms to model from the left/right of true_line. Default (-20, 20)
+        :param rv: str, float
+            The radial velocity, in km/s, of redshift (>0 values are away from the observer). If 'random', draws
+            from a uniform distribution limited by rv_lim.
+        :param rv_lim: tuple
+            Lower and upper boundaries on the uniform distribution that rv draws from if it's 'random'. Default (-100, 100)
+        :param vsini: str, float
+            The rotational velocity, in km/s, of redshift (>0 values are away from the observer). If 'random', draws
+            from a uniform distribution limited by vsini_lim.
+        :param vsini_lim: tuple
+            Lower and upper boundaries on the uniform distribution that vsini draws from if it's 'random'. Default (0, 500)
+        :param noise_std: str, float
+            Standard deviation of the noise to be added to the spectrum.  If 'random', draws from a uniform distribution
+            limited by noise_std_lim.
+        :param noise_std_lim: tuple
+            Lower and upper boundaries on the uniform distribution that noise_std draws from if it's 'random'. Default (0.1, 1)
+        :param A: float
+            Amplitude of the Gaussian model for the emission line BEFORE applying rotational broadening. Default 1.
+        :param sigma: float
+            Standard deviation of the Gaussian model for the emission line BEFORE applying rotational broadening. Default 0.1.
+        :param name: str
+            Name of the spectrum.
+        :param seed: int
+            A seed to use in setting random variables, so they may be reproduced.
+        :return: Spectrum
+            The simulated spectrum object.
+        """
+
+        rng = np.random.default_rng(seed)
+        # Wavelength grid
+        wave = np.arange(true_line+wave_range[0]*2, true_line+wave_range[1]*2+0.1, 0.1)
+
+        # Apply redshift first to avoid reinterpolating the flux
+        if rv == 'random':
+            rv = rng.uniform(*rv_lim)
+        z = maths.calc_redshift_sqrt(rv)
+
+        # First, calculate the perfect idealized (unshifted) spectrum
+        flux = maths.gaussian(wave, A, true_line, sigma) + 1
+
+        # Then apply rotational broadening
+        if vsini == 'random':
+            vsini = rng.uniform(*vsini_lim)
+        flux = fastRotBroad(wave, flux, 0, vsini=vsini)
+
+        range = np.where((wave >= true_line+wave_range[0]) & (wave <= true_line+wave_range[1]))[0]
+        wave = wave[range]
+        flux = flux[range]
+
+        if noise_std == 'random':
+            noise_std = rng.uniform(*noise_std_lim)
+        noise = rng.normal(0, noise_std, wave.size)
+        flux += noise
+        noise = np.abs(noise)
+        snr = 1 / np.mean(noise)
+
+        if name == 'auto':
+            name = 'Sim_A{:.1f}_s{:d}_{:.3f}_{:.3f}_{:.3f}'.format(A, seed, rv, vsini, noise_std)
+
+        return cls(wave, flux, noise, redshift=z, name=name, amp=A, sigma=sigma, snr=snr)
 
 class Spectra(dict):
 
@@ -492,7 +597,7 @@ class Spectra(dict):
             for item, r_vi in zip(self, r_v):
                 self[item].apply_corrections(r_v=r_vi)
 
-    def plot_spectra(self, fname_root, spectra='all', range=None, backend='plotly'):
+    def plot_spectra(self, fname_root, spectra='all', range=None, ylim=None, title_text=None, backend='plotly'):
         """
         Plot a series of spectra from the dictionary.
 
@@ -500,6 +605,15 @@ class Spectra(dict):
             The parent directory to save all plot figures to.
         :param spectra: str, iterable
             Dictionary keys of which spectra to plot. If 'all', all are plotted.  Defaults to all.
+        :param range: optional, tuple
+            x-limits on plotted data
+        :param ylim: optional, tuple
+            y-limits on plotted data
+        :param title_text: optional, dict
+            Title text to be applied to each plotted spectra. Should be a dictionary with each entry having a key
+            of the spectrum name.
+        :param backend: str
+            'plotly' or 'pyplot'
         :return None:
         """
         print('Plotting spectra...')
@@ -509,13 +623,18 @@ class Spectra(dict):
         if (type(spectra) is str):
             if spectra == 'all':
                 for item in tqdm.tqdm(self):
+                    ttl = None if title_text is None else title_text[item]
                     self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum'+format),
-                                    backend=backend, range=range)
+                                    backend=backend, range=range, ylim=ylim, title_text=ttl)
         else:
-            slist = [self[s] for s in spectra]
-            for item in tqdm.tqdm(slist):
-                item.plot(fname=os.path.join(fname_root, item.name.replace(' ', '_')+'.spectrum'+format),
-                          backend=backend, range=range)
+            for item in tqdm.tqdm(self):
+                if item in spectra:
+                    if item not in self or item not in title_text:
+                        print(f'WARNING: {item} not found in stack!')
+                        continue
+                    ttl = None if title_text is None else title_text[item]
+                    self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum'+format),
+                              backend=backend, range=range, ylim=ylim, title_text=ttl)
 
     def get_spec_index(self, name):
         """
@@ -657,6 +776,8 @@ class Stack(Spectra):
         absportion lines that is also covered by all the spectra in the dictionary.  Fails if no such region can
         be found.  The region is set to the instance attribute self.norm_region.
 
+        :param wave_grid: iterable
+            A uniform wave grid used for all spectra.
         :param binned_spec: iterable
             A list of spectra names to use.  If None, all are used.
         :return nr0, nr1: tuple
@@ -786,6 +907,29 @@ class Stack(Spectra):
 
     def histogram_3D(self, fname_base, bin_quantities, logs, nbins=None, bin_size=None, round_bins=None, labels=None,
                      backend='plotly', colormap=None):
+        """
+        Make a 3D histogram of the data using 3 quanitites.
+
+        :param fname_base: str
+            File name without the extension.
+        :param bin_quantities: iterable
+            List of the names of quantities to bin by.
+        :param logs: iterable
+            List of booleans on whether to take the log10 of each bin quantity.
+        :param nbins: iterable
+            List of the number of bins to use for each quantity.
+        :param bin_size: iterable
+            List of the size of each bin to use for each quantity.
+        :param round_bins: iterable
+            List of booleans whether to round bins nicely for each quantity.
+        :param labels: iterable
+            List of labels for each bin.
+        :param backend: str
+            'plotly' or 'pyplot'
+        :param colormap: str or matplotlib colormap object
+            The colormap to use for the 3rd bin quantity.
+        :return:
+        """
 
         binx, biny, binz = bin_quantities
         logx, logy, logz = logs
@@ -919,12 +1063,34 @@ class Stack(Spectra):
             6. Coadd each spectrum together using 1/error^2 as the weights at each pixel value.
             7. Coadd the errors for each spectrum together again using 1/error^2 as the weights at each pixel value.
 
-        :return self.universal_grid: np.ndarray
-            The universal, uniform wavelength grid
-        :return self.stacked_flux: np.ndarray
-            The co-added flux.
-        :return self.stacked_err: np.ndarray
-            The co-added error.
+        :param bin: optional, str
+            The name of a quantity to bin the data by before stacking each bin. Must exist in each Spectrum's data dictionary.
+        :param nbins: optional, int
+            The number of bins to use.
+            If 'bin' is specified, then one of 'nbins' or 'bin_size' must also be specified.
+        :param bin_size: optional, float
+            The size of each bin.
+            If 'bin' is specified, then one of 'nbins' or 'bin_size' must also be specified.
+        :param log: optional, boolean
+            If True, takes the log10 of the bin quantity BEFORE binning. 'nbins' and 'bin_size' should be specified according to
+            the log10 of the bin quantity.
+        :param round_bins: optional, float
+            If specified, rounds the bin edges / bin sizes to be multiples of this quantity.
+        :param auto_norm_region: optional, boolean
+            If True, automatically calculates the normalization region for each stacked bin. Otherwise, uses the default value
+            specified by the norm_region instance attribute.
+        :param bpt_1: optional, str
+            The name of the BPT x-value to be used if 'stack_all_agns' is True. Must exist in each Spectrum's data dictionary.
+        :param bpt_2: optional, str
+            The name of the BPT y-value to be used if 'stack_all_agns' is True. Must exist in each Spectrum's data dictionary.
+        :param hbin_target: int
+            The targeted minimum number of galaxies to include in the highest bin, if stacking by AGN distance, where the
+            distance is in relation to an arbitrary reference point that we have the freedom to choose. Default is 3.
+        :param stack_all_agns: boolean
+            If True, uses the Kewley et al. 2001 AGN criteria as a cutoff and stacks ALL galaxies that satisfy this criteria
+            together. Mutually incompatible with 'bin' and its related arguments.
+
+        :return None:
         """
         self.correct_spectra()
         self.filter_spectra()
@@ -956,7 +1122,7 @@ class Stack(Spectra):
             else:
                 nr0, nr1 = self.norm_region
             self.normalize(wave_grid_b, (nr0, nr1), spectra)
-            flux_b, err_b = self.coadd(wave_grid_b, spectra)
+            wave_grid_b, flux_b, err_b = self.coadd(wave_grid_b, spectra)
             self.universal_grid.append(wave_grid_b)
             self.stacked_flux.append(flux_b)
             self.stacked_err.append(err_b)
@@ -1036,7 +1202,7 @@ class Stack(Spectra):
                 else:
                     nr0, nr1 = self.norm_region
                 self.normalize(wave_grid_b, (nr0, nr1), spectra)
-                flux_b, err_b = self.coadd(wave_grid_b, spectra)
+                wave_grid_b, flux_b, err_b = self.coadd(wave_grid_b, spectra)
                 self.universal_grid.append(wave_grid_b)
                 self.stacked_flux.append(flux_b)
                 self.stacked_err.append(err_b)
@@ -1052,7 +1218,7 @@ class Stack(Spectra):
             else:
                 nr0, nr1 = self.norm_region
             self.normalize(wave_grid, (nr0, nr1))
-            flux, err = self.coadd(wave_grid)
+            wave_grid, flux, err = self.coadd(wave_grid)
             self.universal_grid.append(wave_grid)
             self.stacked_flux.append(flux)
             self.stacked_err.append(err)
@@ -1097,7 +1263,7 @@ class Stack(Spectra):
                     wmin = imin
             imax = np.nanmax(wi)
             if imax < wmax:
-                if np.abs(imin - wmin) > self.tolerance and i != 0:
+                if np.abs(imax - wmax) > self.tolerance and i != 0:
                     remove = True
                 else:
                     wmax = imax
@@ -1124,7 +1290,7 @@ class Stack(Spectra):
         print('Resampling spectra over a uniform wave grid...')
         ss = binned_spec if binned_spec is not None else [s for s in self]
         for ispec in tqdm.tqdm(ss):
-            self[ispec].flux, self[ispec].error = utils.spectres(wave_grid, self[ispec].wave, self[ispec].flux, self[ispec].error, fill=np.nan)
+            self[ispec].flux, self[ispec].error = maths.spectres(wave_grid, self[ispec].wave, self[ispec].flux, self[ispec].error, fill=np.nan)
             self[ispec].wave = wave_grid
 
     def normalize(self, wave_grid, norm_region, binned_spec=None):
@@ -1196,7 +1362,8 @@ class Stack(Spectra):
             else:
                 stacked_flux[i], stacked_err[i] = flux_i, err_i
 
-        return stacked_flux, stacked_err
+        good = np.where(np.isfinite(stacked_flux) & np.isfinite(stacked_err))[0]
+        return wave_grid[good], stacked_flux[good], stacked_err[good]
 
     @staticmethod
     @njit
@@ -1212,7 +1379,7 @@ class Stack(Spectra):
         # stacked_err = np.sqrt(1/np.nansum(weights))
         return stacked_flux, stacked_err
 
-    def calc_line_flux_ratios(self, line=6374, dw=5, norm_dw=100, save=False, path=''):
+    def calc_line_flux_ratios(self, line, dw=5, norm_dw=100, save=False, conf=None, path=''):
         """
         Calculate the integrated flux ratios of each spectra compared to the stacked spectrum.
 
@@ -1220,18 +1387,30 @@ class Stack(Spectra):
             The center wavelength at which to integrate (angstroms).
         :param dw: float, int
             The distance to the left/right of the center wavelength to integrate (angstroms).
+        :param norm_dw: float, int
+            The distance to the left/right of the center wavelength to consider for normalizing spectra.
+        :param save: boolean
+            If True, saves the line flux ratios as a json file.
+        :param conf: str
+            Key for a confidence parameter in each spectrum's dictionary to compare to the line flux ratios.
+        :param path: str
+            Output path for the json file if 'save' is True.
         :return out: dict
             Dictionary of keys: spectra names, and values: tuple(integrated flux, error) / stacked spectrum integrated flux.
         """
         out = {}
+        confs = {}
+        if len(self.universal_grid) == 0:
+            raise ValueError("Stacked spectrum has not yet been generated!")
         self._renorm_stack((line-norm_dw, line+norm_dw))
         for i in range(len(self.universal_grid)):
             print(f"BIN {i+1} of {len(self.universal_grid)}...")
-            cspline_stack = scipy.interpolate.CubicSpline(self.universal_grid[i], self.stacked_flux[i]-1,
+            cspline_stack = scipy.interpolate.CubicSpline(self.universal_grid[i], self.stacked_flux[i],
                                                           extrapolate=False)
 
             baseline, err = scipy.integrate.quad(cspline_stack.__call__, line-dw, line+dw)
             out[i] = {"stack": (baseline, err)}
+            confs[i] = {}
             if self.binned_spec:
                 ss = self.binned_spec[i]
             else:
@@ -1246,15 +1425,20 @@ class Stack(Spectra):
                           f"Cannot calculate relative line flux.")
                     continue
                 good = np.where(good)[0]
-                csplinei = scipy.interpolate.CubicSpline(self[ispec].wave[good], self[ispec].flux[good]-1, extrapolate=False)
+                csplinei = scipy.interpolate.CubicSpline(self[ispec].wave[good], self[ispec].flux[good], extrapolate=False)
                 intflux, erri = scipy.integrate.quad(csplinei.__call__, line-dw, line+dw)
                 out[i][ispec] = (intflux/baseline, err/baseline)
+                if conf:
+                    confs[i][ispec] = self[ispec].data[conf]
 
         if save:
             serialized = json.dumps(out, indent=4)
             with open(path + os.sep + 'line_flux_ratios_'+utils.gen_datestr(True)+'.json', 'w') as handle:
                 handle.write(serialized)
-        return out
+        if conf:
+            return out, confs
+        else:
+            return out
 
     def plot_stacked(self, fname_base, emline_color="rebeccapurple", absorp_color="darkgoldenrod", cline_color="cyan",
                      backend='plotly'):
@@ -1270,6 +1454,8 @@ class Stack(Spectra):
             If backend is 'pyplot', this specifies the color of the plotted emission lines.  Default is 'rebeccapurple'.
         :param absorp_color: str
             If backend is 'pyplot', this specifies the color of the plotted absorption lines. Default is 'darkgoldenrod'.
+        :param cline_color: str
+            If backend is 'pyplot', this specifies the color of the plotted coronal lines. Default is 'cyan'.
         :param backend: str
             May be 'pyplot' to use the pyplot module or 'plotly' to use the plotly module for plotting.  Default is
             'plotly'.
@@ -1384,7 +1570,7 @@ class Stack(Spectra):
                 fig.write_html(fname)
                 # fig.write_image(fname.replace('.html', '.pdf'))
 
-    def plot_spectra(self, fname_root, spectra='all', range=None, backend='plotly'):
+    def plot_spectra(self, fname_root, spectra='all', range=None, ylim=None, title_text=None, backend='plotly'):
         """
         Spectra.plot_spectra but incorporates the information from self.normalized.
 
@@ -1396,13 +1582,18 @@ class Stack(Spectra):
         if (type(spectra) is str):
             if spectra == 'all':
                 for item in tqdm.tqdm(self):
+                    ttl = None if title_text is None else title_text[item]
                     self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum'+format),
-                                    normalized=True, backend=backend, range=range)
+                                    normalized=True, backend=backend, range=range, ylim=ylim, title_text=ttl)
         else:
-            slist = [self[s] for s in spectra]
-            for item in tqdm.tqdm(slist):
-                item.plot(fname=os.path.join(fname_root, item.name.replace(' ', '_')+'.spectrum'+format),
-                          normalized=True, backend=backend, range=range)
+            for item in tqdm.tqdm(self):
+                if item in spectra:
+                    if item not in self or item not in title_text:
+                        print(f'WARNING: {item} not found in stack!')
+                        continue
+                    ttl = None if title_text is None else title_text[item]
+                    self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum'+format),
+                              normalized=True, backend=backend, range=range, ylim=ylim, title_text=ttl)
 
     def plot_hist(self, fname_base, plot_log=False, backend='plotly'):
         """
@@ -1410,6 +1601,8 @@ class Stack(Spectra):
 
         :param fname_base: str
             File name pattern.
+        :param plot_log: boolean
+            If True, makes the y-axis logarithmic.
         :param backend: str
             Whether to use matplotlib or plotly to plot stuff
         :return None:
@@ -1451,6 +1644,25 @@ class Stack(Spectra):
             # fig.write_image(fname.replace('.html', '.pdf'))
 
     def plot_agn(self, fname_base, bpt_x, bpt_y, bpt_xerr=None, bpt_yerr=None, labels=None, backend='plotly'):
+        """
+        Plot galaxies in the stack on a BPT-diagram, assuming galaxies have the appropriate BPT data to do so.
+
+        :param fname_base: str
+            Filename exlcuding the extension.
+        :param bpt_x: str
+            The name of the BPT ratio for the x-axis.
+        :param bpt_y: str
+            The name of the BPT ratio for the y-axis.
+        :param bpt_xerr: optional, str
+            The name of the error in the x-axis BPT ratio.  If not specified, no errorbars will be plotted.
+        :param bpt_yerr: optional, str
+            The name of the error in the y-axis BPT ratio.  If not specified, no errorbars will be plotted.
+        :param labels: iterable
+            List of strings specifying the names of the x and y axes.
+        :param backend: str
+            'plotly' or 'pyplot'
+        :return:
+        """
         format = '.html' if backend == 'plotly' else '.pdf'
         fname = fname_base + format
         data = np.array([(self[i].data[bpt_x], self[i].data[bpt_y], self[i].data['agn_frac']) for i in range(len(self))])
@@ -1506,12 +1718,47 @@ class Stack(Spectra):
             # fig.write_image(fname.replace('.html', '.pdf'))
 
     def plot_line_flux_ratios(self, fluxr_dict, line=6374, dw=10, ratio_target=1, plot_backend='plotly', path='',
-                              agn_diagnostics=False):
-        self.line_flux_diagnostics(fluxr_dict, line, dw, plot_backend, path)
+                              agn_diagnostics=False, ylim=None, title_text_conf=None, title_text_snr=None,
+                              conf_dict=None, plot_spec='none'):
+        """
+        Plotting diagnostics for line flux ratio tests.
+
+        :param fluxr_dict: dict
+            Dictionary of results from a line flux test, as formatted by the calc_line_flux_ratios method.
+        :param line: int, float
+            The wavelength of the line that was integrated in fluxr_dict.
+        :param dw: int, float
+            Range of wavelengths to the left/right of line that was used in the integration of fluxr_dict.
+        :param ratio_target: int, float
+            A cutoff of the integrated line flux above which to consider a galaxies a 'detection'
+        :param plot_backend: str
+            'pyplot' or 'plotly'
+        :param path: str
+            Output path for plots.
+        :param agn_diagnostics: boolean
+            If True, calculate the Kewley et al. 2001 criteria for spectra and print comparisons to those detected by
+            the line flux tests. Requires spectra to have BPT data ALREADY CALCULATED.
+        :param ylim: optional, tuple
+            Plot y-limits to be passed to the plot_spectra method.
+        :param title_text_conf: optional, str
+            Name of the a priori confidence value of a spectrum. Must be in the Spectrum's data dictionary.
+        :param title_text_snr: optional, str
+            Name of the SNR value of a spectrum. Must be in the Spectrum's data dictionary.
+        :param conf_dict: optional, dict
+            A priori confidence levels for each spectra, as formatted by the calc_line_flux_ratios method.
+        :param plot_spec: str
+            'none', 'all', or 'detections' to plot none, all, or only those individual spectra that satisfy the
+            detection criterium.
+        :return ss: list of np.ndarray
+            The names of all the spectra that passed the detection criterium for each bin.
+        """
+        self._line_flux_diagnostics(fluxr_dict, line, dw, plot_backend, conf_dict=conf_dict, path=path)
         ss = []
         for i in range(len(fluxr_dict)):
             ratios = np.array([fluxr_dict[i][key][0] for key in fluxr_dict[i] if key != 'stack'])
-            specnames = np.array([key for key in fluxr_dict[i] if key != 'stack'], dtype='<U19')
+            specnames = np.array([key for key in fluxr_dict[i] if key != 'stack'], dtype=object)
+            if title_text_conf:
+                confidences = np.array([self[sn].data[title_text_conf] for sn in specnames])
             # ind = ratios.argsort()[-5:][::-1]
             w = np.where(ratios >= ratio_target)[0]
             print(len(w), f' galaxies fulfill the threshold of {ratio_target}:')
@@ -1522,11 +1769,21 @@ class Stack(Spectra):
                 print(f'Of these, {len(kw)} did NOT satisfy the Kewley et al. 2001 criteria: ')
                 print(specnames[kw])
             ss.append(specnames[w])
-            self.plot_spectra(os.path.join(path, 'spectra'), specnames[w], range=self.norm_region, backend='pyplot')
+            if title_text_snr:
+                snrs = np.array([self[si].data[title_text_snr] for si in specnames[w]])
+            tt = {s: '$\mathcal{F}=%.3f$' % r for s, r in zip(specnames, ratios)} if not title_text_conf else \
+                {s: '$\mathcal{F}=%.3f$; $conf=%.3f$' % (r, c) for s, r, c in zip(specnames, ratios, confidences)} if not title_text_snr else \
+                {s: '$\mathcal{F}=%.3f$; $conf=%.3f$; $SNR=%.3f$' % (r, c, snr) for s, r, c, snr in zip(specnames, ratios, confidences, snrs)}
+            if plot_spec != 'none':
+                names = specnames if plot_spec == 'all' else specnames[w] if plot_spec == 'detections' else None
+                if names is None:
+                    raise ValueError('invalid plot_spec option')
+                self.plot_spectra(os.path.join(path, 'spectra'), names, range=self.norm_region, ylim=ylim, backend='pyplot',
+                                  title_text=tt)
         return ss
 
-    def line_flux_diagnostics(self, fluxr_dict, line=6374, dw=10, plot_backend='pyplot', path=''):
-        # 10^-17 erg s^-1 cm^-2 (not per anstrom after integration)
+    def _line_flux_diagnostics(self, fluxr_dict, line=6374, dw=10, plot_backend='pyplot', conf_dict=None, path=''):
+        # 10^-17 erg s^-1 cm^-2 (not per angstrom after integration)
         # Get data
         lengths = [len(fluxr_dict[fi]) for fi in fluxr_dict]
         ratios = []
@@ -1538,8 +1795,9 @@ class Stack(Spectra):
             stack_fluxes.append(fluxr_dict[i]['stack'][0])
 
         # Get mins/maxes
-        mins = np.full((2, len(fluxr_dict)), fill_value='', dtype='<U19')
-        maxs = np.full_like(mins, fill_value='', dtype='<U19')
+        # lstr = len(list(fluxr_dict[0].keys())[0])
+        mins = np.full((2, len(fluxr_dict)), fill_value='', dtype=object)
+        maxs = np.full_like(mins, fill_value='', dtype=object)
         minr = np.full((2, len(fluxr_dict)), fill_value=np.nan, dtype=float)
         maxr = np.full_like(minr, fill_value=np.nan, dtype=float)
         for j in range(len(fluxr_dict)):
@@ -1580,7 +1838,8 @@ class Stack(Spectra):
                                         color='mediumaquamarine', alpha=0.5)
                     small1.axvline(line, linestyle='--', color='k')
                     small1.axvspan(line-dw, line+dw, color='slategrey', alpha=0.5)
-                    small1.set_title(mins[m, k])
+                    ttl = mins[m, k] if len(mins[m, k]) <= 10 else mins[m, k][0:10] + '...'
+                    small1.set_title(ttl)
                     small1.set_xticks([line-dw, line+dw])
                     if m == 0:
                         small1.set_ylabel('Norm. Flux')
@@ -1597,7 +1856,8 @@ class Stack(Spectra):
                                       color='mediumaquamarine', alpha=0.5)
                     big1.axvline(line, linestyle='--', color='k')
                     big1.axvspan(line-dw, line+dw, color='slategrey', alpha=0.5)
-                    big1.set_title(maxs[m, k])
+                    ttl = maxs[m, k] if len(maxs[m, k]) <= 10 else maxs[m, k][0:10] + '...'
+                    big1.set_title(ttl)
                     big1.set_xticks([line-dw, line+dw])
                     big.append(big1)
 
@@ -1626,14 +1886,56 @@ class Stack(Spectra):
                 stack.set_title('Stack')
                 fig.savefig(path+os.sep+'line_flux_ratios_'+str(k)+'.pdf', dpi=300)
                 plt.close()
+
+            if conf_dict:
+                confidences = []
+
+                for k in range(len(fluxr_dict)):
+                    confidences.append(np.array([conf_dict[k][fi] for fi in conf_dict[k] if fi != 'stack']))
+
+                    # Sort
+                    isort = np.argsort(confidences[k])
+                    confidences[k] = confidences[k][isort]
+                    ratios[k] = ratios[k][isort]
+                    good = np.where(np.isfinite(confidences[k]) & np.isfinite(ratios[k]) & (np.abs(ratios[k]) < 10))[0]
+                    ntop = int(.2*len(ratios[k]))
+                    rsort = np.argsort(ratios[k])
+                    top20 = ratios[k][rsort][len(ratios[k])-ntop:]
+                    top20c = confidences[k][rsort][len(ratios[k])-ntop:]
+
+                    A = np.vstack((confidences[k][good], np.ones_like(confidences[k][good]))).T
+                    m, c = np.linalg.lstsq(A, ratios[k][good], rcond=None)[0]
+                    x_model = np.linspace(confidences[k][0], confidences[k][-1], 1000)
+                    y_model = m*x_model + c
+
+                    std = np.std(ratios[k])
+                    median = np.nanmedian(ratios[k])
+                    good = np.where(np.abs(ratios[k] - median) < std)[0]
+
+                    fig, ax = plt.subplots()
+                    ax.plot(confidences[k], ratios[k], '.', color='rebeccapurple')
+                    ax.plot(top20c, top20, '.', color='cyan', label='Top 20%')
+                    ax.plot(x_model, y_model, 'k--')
+                    ax.legend()
+                    ax.set_title('Linear Least Squares Fit: $m=%.3f$, $b=%.3f$' % (m, c))
+                    ax.set_xlabel('Confidence Level')
+                    ax.set_ylabel('Line Flux Ratio Parameter $\mathcal{F}$')
+                    # ax.set_ylim(-10, 10)
+                    fig.savefig(path+os.sep+'line_flux_confidence_covar_'+str(k)+'.pdf', dpi=300)
+                    plt.close()
+
         elif plot_backend == 'plotly':
             for k in range(len(fluxr_dict)):
+                ttl1 = maxs[0, k] if len(maxs[0, k]) <= 10 else maxs[0, k][0:10] + '...'
+                ttl2 = maxs[1, k] if len(maxs[1, k]) <= 10 else maxs[1, k][0:10] + '...'
+                ttl3 = mins[0, k] if len(mins[0, k]) <= 10 else mins[0, k][0:10] + '...'
+                ttl4 = mins[1, k] if len(mins[1, k]) <= 10 else mins[1, k][0:10] + '...'
                 fig = plotly.subplots.make_subplots(rows=3, cols=3,
                                                     specs=[[{"rowspan": 2, "colspan": 2}, None, {}],
                                                            [None, None, {}],
                                                            [{}, {}, {}]],
                                                     subplot_titles=['Stacked line flux = %.3f &times; 10<sup>-17</sup> erg s<sup>-1</sup> cm<sup>-2</sup>' % stack_fluxes[k],
-                                                                    maxs[0, k], maxs[1, k], mins[0, k], mins[1, k], 'Stack'])
+                                                                    ttl1, ttl2, ttl3, ttl4, 'Stack'])
                 fig.add_trace(plotly.graph_objects.Histogram(x=ratios[k], xbins=dict(start=0, end=3, size=0.2)), row=1, col=1)
                 fig.update_traces(marker_color='rgb(158,202,225)', marker_line_color='rgb(8,48,107)',
                                   marker_line_width=0.0, opacity=0.8, row=1, col=1)
@@ -1727,6 +2029,48 @@ class Stack(Spectra):
 
                 fig.write_html(path+os.sep+'line_flux_ratios_'+str(k)+'.html')
                 # fig.write_image(path+os.sep+'line_flux_ratios_'+str(k)+'.pdf')
+
+            if conf_dict:
+                confidences = []
+
+                for k in range(len(fluxr_dict)):
+                    confidences.append(np.array([conf_dict[k][fi] for fi in conf_dict[k] if fi != 'stack']))
+
+                    # Sort
+                    isort = np.argsort(confidences[k])
+                    confidences[k] = confidences[k][isort]
+                    ratios[k] = ratios[k][isort]
+                    good = np.where(np.isfinite(confidences[k]) & np.isfinite(ratios[k]) & (np.abs(ratios[k]) < 10))[0]
+                    ntop = int(.2*len(ratios[k]))
+                    rsort = np.argsort(ratios[k])
+                    top20 = ratios[k][rsort][len(ratios[k])-ntop:]
+                    top20c = confidences[k][rsort][len(ratios[k])-ntop:]
+
+                    A = np.vstack((confidences[k][good], np.ones_like(confidences[k][good]))).T
+                    m, c = np.linalg.lstsq(A, ratios[k][good], rcond=None)[0]
+                    x_model = np.linspace(confidences[k][0], confidences[k][-1], 1000)
+                    y_model = m*x_model + c
+
+                    std = np.std(ratios[k])
+                    median = np.nanmedian(ratios[k])
+                    good = np.where(np.abs(ratios[k] - median) < std)[0]
+
+                    fig = plotly.subplots.make_subplots(rows=1, cols=1)
+                    fig.add_trace(plotly.graph_objects.Scatter(x=confidences[k][good], y=ratios[k][good], mode='markers',
+                        marker=dict(size=4, color='#663399'), showlegend=False))
+                    fig.add_trace(plotly.graph_objects.Scatter(x=top20c, y=top20, mode='markers',
+                        marker=dict(size=4, color='#48CADB'), showlegend=False))
+                    fig.add_trace(plotly.graph_objects.Scatter(x=x_model, y=y_model, line=dict(color='black', width=.5, dash='dash'),
+                                                               showlegend=False))
+                    fig.update_layout(
+                        title='Linear Least Squares Fit: m=%.3f, b=%.3f' % (m, c),
+                        xaxis_title='Confidence Level',
+                        yaxis_title='Line Flux Ratio Parameter <em>F</em>',
+                        # yaxis_range=(-10, 10),
+                        # yaxis_constrain='domain'
+                    )
+                    fig.write_html(path+os.sep+'line_flux_confidence_covar_'+str(k)+'.html')
+
         else:
             raise NotImplementedError
 
