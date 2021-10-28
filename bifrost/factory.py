@@ -11,11 +11,11 @@ from joblib import Parallel, delayed
 from bifrost import spectrum, utils, filters
 
 
-def driver(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=False, plot_backend='plotly',
+def quick_fits_stack(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=False, plot_backend='plotly',
          plot_spec=None, limits=None, _filters=None, name_by='folder', properties_tbl=None, properties_comment='#',
          properties_sep=',', properties_name_col=0):
     """
-    The main driver for the stacking code.
+    A convenience function for quickly creating a stack object from FITS files.
 
     :param data_path: str
         The path to the parent folder containing fits files, or subfolders with fits files.
@@ -126,7 +126,7 @@ def driver(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=Fals
     return stack
 
 
-def sim_driver(line, size=10_000, wave_range=(-20, 20), rv='random', rv_lim=(-100, 100), vsini='random',
+def quick_sim_stack(line, size=10_000, wave_range=(-20, 20), rv='random', rv_lim=(-100, 100), vsini='random',
                vsini_lim=(0, 500), noise_std='random', noise_std_lim=(0.1, 1),
                amplitudes=None, widths=None,
                out_path=None, n_jobs=-1, save_pickle=True, save_json=False, plot_backend='plotly',
@@ -207,99 +207,99 @@ def sim_driver(line, size=10_000, wave_range=(-20, 20), rv='random', rv_lim=(-10
     return stack
 
 
-def plotter(stack_path, out_path=None, plot_backend='plotly', plot_spec=None, plot_hist=False, plot_log=False):
-    """
-    Replot the stacked spectra.
-
-    :param stack_path: str
-        Path to a pickle or json file containing the stack object.
-    :param out_path: str
-        Folder / file name to save the new files to.
-    :param plot_backend: str
-        May be 'pyplot' to use pyplot or 'plotly' to use plotly for plotting.  Default is 'plotly'.
-    :param plot_spec: str, iterable
-        Spectra to plot individually
-    :return None:
-    """
-    format = stack_path.split('.')[-1]
-    if not out_path:
-        out_path = os.path.dirname(stack_path)
-    if format == 'json':
-        def json_stack_hook(_dict):
-            options = dict(
-                r_v=_dict['r_v'],
-                gridspace=_dict['gridspace'],
-                tolerance=_dict['tolerance'],
-                norm_region=_dict['norm_region'],
-                default_filters=_dict['default_filters']
-            )
-            fs = [filters.Filter.from_str(ff) for ff in _dict['filters']]
-            return spectrum.Stack(universal_grid=np.array(_dict['universal_grid']), stacked_flux=np.array(_dict['stacked_flux']),
-                                  stacked_err=np.array(_dict['stacked_err']), filters=fs, **options)
-
-        stack = json.load(open(stack_path, 'r'), object_hook=json_stack_hook)
-    elif format == 'pkl':
-        stack = pickle.load(open(stack_path, 'rb'))
-    else:
-        raise ValueError(f"Cannot read object file type: {format}")
-
-    if not plot_spec:
-        stack.plot_stacked(os.path.join(out_path, 'stacked_plot'), backend=plot_backend)
-    else:
-        if format == 'json':
-            raise AttributeError("Cannot read individual spectra from a saved json file, only the stacked data "
-                                 "is saved.")
-        stack.plot_spectra(out_path, spectra=plot_spec, backend=plot_backend)
-    if plot_hist:
-        stack.plot_hist(os.path.join(out_path, 'binned_plot'), backend=plot_backend, plot_log=plot_log)
-
-
-def rebin(stack_path, bin_quant, nbins=None, bin_size=None, bin_log=False, plot_log=False, out_path=None, out_name=None,
-          plot_backend='plotly'):
-    format = stack_path.split('.')[-1]
-    if not out_path:
-        out_path = os.path.dirname(stack_path)
-    if not os.path.exists(out_path):
-        os.makedirs(out_path)
-    if format == 'json':
-        raise ValueError(f"Cannot rebin file type: {format}")
-    elif format == 'pkl':
-        stack = pickle.load(open(stack_path, 'rb'))
-
-    stack(bin=bin_quant, nbins=nbins, bin_size=bin_size, log=bin_log)
-    stack.plot_stacked(os.path.join(out_path, 'stacked_plot'), backend=plot_backend)
-    stack.plot_hist(os.path.join(out_path, 'binned_plot'), backend=plot_backend, plot_log=plot_log)
-
-    if not out_name:
-        out_name = 'stacked_data.pkl'
-    stack.save_pickle(os.path.join(out_path, out_name))
+# def plotter(stack_path, out_path=None, plot_backend='plotly', plot_spec=None, plot_hist=False, plot_log=False):
+#     """
+#     Replot the stacked spectra.
+#
+#     :param stack_path: str
+#         Path to a pickle or json file containing the stack object.
+#     :param out_path: str
+#         Folder / file name to save the new files to.
+#     :param plot_backend: str
+#         May be 'pyplot' to use pyplot or 'plotly' to use plotly for plotting.  Default is 'plotly'.
+#     :param plot_spec: str, iterable
+#         Spectra to plot individually
+#     :return None:
+#     """
+#     format = stack_path.split('.')[-1]
+#     if not out_path:
+#         out_path = os.path.dirname(stack_path)
+#     if format == 'json':
+#         def json_stack_hook(_dict):
+#             options = dict(
+#                 r_v=_dict['r_v'],
+#                 gridspace=_dict['gridspace'],
+#                 tolerance=_dict['tolerance'],
+#                 norm_region=_dict['norm_region'],
+#                 default_filters=_dict['default_filters']
+#             )
+#             fs = [filters.Filter.from_str(ff) for ff in _dict['filters']]
+#             return spectrum.Stack(universal_grid=np.array(_dict['universal_grid']), stacked_flux=np.array(_dict['stacked_flux']),
+#                                   stacked_err=np.array(_dict['stacked_err']), filters=fs, **options)
+#
+#         stack = json.load(open(stack_path, 'r'), object_hook=json_stack_hook)
+#     elif format == 'pkl':
+#         stack = pickle.load(open(stack_path, 'rb'))
+#     else:
+#         raise ValueError(f"Cannot read object file type: {format}")
+#
+#     if not plot_spec:
+#         stack.plot_stacked(os.path.join(out_path, 'stacked_plot'), backend=plot_backend)
+#     else:
+#         if format == 'json':
+#             raise AttributeError("Cannot read individual spectra from a saved json file, only the stacked data "
+#                                  "is saved.")
+#         stack.plot_spectra(out_path, spectra=plot_spec, backend=plot_backend)
+#     if plot_hist:
+#         stack.plot_hist(os.path.join(out_path, 'binned_plot'), backend=plot_backend, plot_log=plot_log)
 
 
-def edit_config(**options):
-    """
-    Edit the default configuration options for the Stack object.
-    :param options: dict
-        Keyword arguments corresponding to each option
-    :return None:
-    """
-    # Load in the current config file
-    config_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'config.json')
-    blueprints = json.load(open(config_path, 'r'))
+# def rebin(stack_path, bin_quant, nbins=None, bin_size=None, bin_log=False, plot_log=False, out_path=None, out_name=None,
+#           plot_backend='plotly'):
+#     format = stack_path.split('.')[-1]
+#     if not out_path:
+#         out_path = os.path.dirname(stack_path)
+#     if not os.path.exists(out_path):
+#         os.makedirs(out_path)
+#     if format == 'json':
+#         raise ValueError(f"Cannot rebin file type: {format}")
+#     elif format == 'pkl':
+#         stack = pickle.load(open(stack_path, 'rb'))
+#
+#     stack(bin=bin_quant, nbins=nbins, bin_size=bin_size, log=bin_log)
+#     stack.plot_stacked(os.path.join(out_path, 'stacked_plot'), backend=plot_backend)
+#     stack.plot_hist(os.path.join(out_path, 'binned_plot'), backend=plot_backend, plot_log=plot_log)
+#
+#     if not out_name:
+#         out_name = 'stacked_data.pkl'
+#     stack.save_pickle(os.path.join(out_path, out_name))
 
-    # Edit the options based on arguments
-    for option in options:
-        value = options[option]
-        if option == 'r_v':
-            assert value >= 0, "r_v must be positive!"
-        elif option == 'gridspace':
-            assert value > 0, "gridspace must be nonzero!"
-        elif option == 'tolerance':
-            assert value > 0, "tolerance must be nonzero!"
-        elif option == 'norm_region' and value is not None:
-            assert value[0] < value[1], "right bound must be larger than left bound!"
-        blueprints[option] = value
 
-    # Rewrite the config file with the new options
-    serialized = json.dumps(blueprints, indent=4)
-    with open(config_path, 'w') as handle:
-        handle.write(serialized)
+# def edit_config(**options):
+#     """
+#     Edit the default configuration options for the Stack object.
+#     :param options: dict
+#         Keyword arguments corresponding to each option
+#     :return None:
+#     """
+#     # Load in the current config file
+#     config_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'config.json')
+#     blueprints = json.load(open(config_path, 'r'))
+#
+#     # Edit the options based on arguments
+#     for option in options:
+#         value = options[option]
+#         if option == 'r_v':
+#             assert value >= 0, "r_v must be positive!"
+#         elif option == 'gridspace':
+#             assert value > 0, "gridspace must be nonzero!"
+#         elif option == 'tolerance':
+#             assert value > 0, "tolerance must be nonzero!"
+#         elif option == 'norm_region' and value is not None:
+#             assert value[0] < value[1], "right bound must be larger than left bound!"
+#         blueprints[option] = value
+#
+#     # Rewrite the config file with the new options
+#     serialized = json.dumps(blueprints, indent=4)
+#     with open(config_path, 'w') as handle:
+#         handle.write(serialized)

@@ -724,33 +724,41 @@ class Spectra(dict):
 
 class Stack(Spectra):
 
-    def __init__(self, universal_grid=None, stacked_flux=None, stacked_err=None, filters=None, **options):
+    def __init__(self, universal_grid=None, stacked_flux=None, stacked_err=None, filters=None, r_v=3.1,
+                 gridspace=1, tolerance=500, norm_region=None):
         """
         An extension of the Spectra class (and by extension, the dictionary) specifically for stacking purposes.
 
+        :param universal_grid: optional, array
+            A uniform wavelength grid used for all spectra.  If binned, a list of arrays for each bin.
+        :param stacked_flux: optional, array
+            An array of the stacked flux. If binned, a list of arrays for each bin.
+        :param stacked_err: optional, array
+            An array of the stacked flux error. If binned, a list of arrays for each bin.
+        :param filters: optional, array
+            An array of filters to remove individual spectra that do not satisfy certain conditions.
+            Each entry must either be a bifrost Filter object or a string that can be converted into a Filter object.
+        :param r_v: float
+            Extinction ratio A(V)/E(B-V) to calculate for.  Default = 3.1
+        :param gridspace: float
+            Spacing of the wavelength grid.  Default = 1
+        :param tolerance: float
+            Tolerance for throwing out spectra that are > tolerance angstroms apart from others.  Default = 500
+        :param norm_region: optional, tuple
+            Wavelength bounds to use for the normalization region, with no prominent lines.  Default = None
         """
-        # Load in the blueprints dictionary from config.json
-        config_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'config.json')
-        blueprints = json.load(open(config_path, 'r'))
-        """
-        r_v:              Extinction ratio A(V)/E(B-V) to calculate for.  Default = 3.1
-        gridspace:        Spacing of the wavelength grid.  Default = 1
-        tolerance:        Tolerance for throwing out spectra that are > tolerance angstroms apart from others.  Default = 500
-        norm_region:      Wavelength bounds to use for the normalization region, with no prominent lines.  Default = None
-        default_filters:  Default filters to apply to all runs.  Default = []
-        """
-        # Edit the blueprints dictionary with any user-specified options
-        for option in options:
-            if option not in blueprints:
-                raise ValueError(f"The {option} key is not recognized as a configuration parameter!")
-            blueprints[option] = options[option]
-        # Update the object using the blueprints dictionary
-        self.__dict__.update(**blueprints)
+        # Fill in instance attributes
+        self.r_v = r_v
+        self.gridspace = gridspace
+        self.tolerance = tolerance
+        self.norm_region = norm_region
         # Filters
         if filters is None:
             filters = []
-        for f in self.default_filters:
-            filters.append(bfilters.Filter.from_str(f))
+        else:
+            for i in range(len(filters)):
+                if type(filters[i]) is str:
+                    filters[i] = bfilters.Filter.from_str(filters[i])
         self.filters = filters
         # Default object properties that will be filled in later
         if not universal_grid:

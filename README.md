@@ -6,9 +6,10 @@ black holes, just as the burning rainbow bridge it is named after bridges the ga
 between Asgard and Midgard, by providing a means of searching for them via a
 spectral stacking framework.
 
-### Installation
+## Installation
 After cloning the repository, you can install locally via pip: ` pip install . `
-Or alternatively, ` python setup.py install `.
+<br>Or alternatively, ` python setup.py install `
 
-It may be necessary to increase the open file limit with ` ulimit -n XXXX `, depending
-on how many spectra you are stacking at once.
+*Note: It may be necessary to increase the open file limit with* ` ulimit -n XXXX `, *depending
+on how many spectra you are stacking at once.*
+
