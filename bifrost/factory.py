@@ -11,9 +11,10 @@ from joblib import Parallel, delayed
 from bifrost import spectrum, utils, filters
 
 
+@utils.timer(name='Quick FITS Load')
 def quick_fits_stack(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=False, plot_backend='plotly',
          plot_spec=None, limits=None, _filters=None, name_by='folder', properties_tbl=None, properties_comment='#',
-         properties_sep=',', properties_name_col=0):
+         properties_sep=',', properties_name_col=0, progress_bar=True):
     """
     A convenience function for quickly creating a stack object from FITS files.
 
@@ -53,6 +54,8 @@ def quick_fits_stack(data_path, out_path=None, n_jobs=-1, save_pickle=True, save
         Comment character for the properties_tbl file.  Default: "#"
     :param properties_name_col: int
         Index of the column that speicifies object name in the properties_tbl file.  Default: 0.
+    :param progress_bar: bool
+        If True, shows a progress bar for reading in files.  Default is False.
     :return stack: Stack
         The Stack object.
     """
@@ -64,7 +67,7 @@ def quick_fits_stack(data_path, out_path=None, n_jobs=-1, save_pickle=True, save
     out_path += os.sep
 
     # Gather spectra paths
-    all_spectra = utils.get_filepaths_from_parent(data_path, 'fits')
+    all_spectra = utils.get_filepaths_from_parent(data_path, ['fits', 'fit', 'fit.fz', 'fits.fz'])
     if limits:
         all_spectra = all_spectra[limits[0]:limits[1]]
 
@@ -76,7 +79,7 @@ def quick_fits_stack(data_path, out_path=None, n_jobs=-1, save_pickle=True, save
         _filters = [_filters]
     for _filter in _filters:
         filter_list.append(filters.Filter.from_str(_filter))
-    stack = spectrum.Stack(filters=filter_list)
+    stack = spectrum.Stack(filters=filter_list, progress_bar=progress_bar)
 
     assert name_by in ('file', 'folder'), "name_by must be one of ['file', 'folder']"
     def make_spec(filepath):
@@ -91,9 +94,11 @@ def quick_fits_stack(data_path, out_path=None, n_jobs=-1, save_pickle=True, save
         return ispec
 
     print('Loading in spectra...')
-    specs = Parallel(n_jobs=n_jobs)(delayed(make_spec)(fpath) for fpath in tqdm.tqdm(all_spectra))
+    range_ = tqdm.tqdm(all_spectra) if progress_bar else all_spectra
+    specs = Parallel(n_jobs=n_jobs)(delayed(make_spec)(fpath) for fpath in range_)
     for ispec in specs:
         stack.add_spec(ispec)
+    print('Done.')
 
     if properties_tbl:
         print('Loading in table data...')
@@ -108,13 +113,15 @@ def quick_fits_stack(data_path, out_path=None, n_jobs=-1, save_pickle=True, save
         for tbl, sep, comm, name in zip(properties_tbl, properties_sep, properties_comment, properties_name_col):
             tbl_data = pd.read_csv(tbl, delimiter=sep, comment=comm,
                                    skipinitialspace=True, header=0, index_col=name)
-            for namei in tqdm.tqdm(tbl_data.index):
+            range_ = tqdm.tqdm(tbl_data.index) if progress_bar else tbl_data.index
+            for namei in range_:
                 # assert namei in stack.keys(), f"ERROR: {namei} not found in Stack!"
                 if str(namei) not in stack:
                     print(f"WARNING: {namei} not found in stack!")
                     continue
                 for tbl_col in tbl_data.columns:
                     stack[str(namei)].data[tbl_col] = tbl_data[tbl_col][namei]
+        print('Done.')
 
     if plot_spec:
         stack.plot_spectra(out_path, spectra=plot_spec, backend=plot_backend)
@@ -126,11 +133,12 @@ def quick_fits_stack(data_path, out_path=None, n_jobs=-1, save_pickle=True, save
     return stack
 
 
+@utils.timer(name='Quick Sim Load')
 def quick_sim_stack(line, size=10_000, wave_range=(-20, 20), rv='random', rv_lim=(-100, 100), vsini='random',
                vsini_lim=(0, 500), noise_std='random', noise_std_lim=(0.1, 1),
                amplitudes=None, widths=None,
                out_path=None, n_jobs=-1, save_pickle=True, save_json=False, plot_backend='plotly',
-               plot_spec=None, _filters=None, seeds=None):
+               plot_spec=None, _filters=None, seeds=None, progress_bar=False):
     """
     The main driver for the stacking code.
 
@@ -161,6 +169,8 @@ def quick_sim_stack(line, size=10_000, wave_range=(-20, 20), rv='random', rv_lim
         Which spectra to plot individually.  Default is None, which doesn't plot any.
     :param _filters: str, iterable
         Filter objects to be applied to the Stack.
+    :param progress_bar: bool
+        If True, shows a progress bar for reading in files.  Default is False.
     :return stack: Stack
         The Stack object.
     """
@@ -179,7 +189,7 @@ def quick_sim_stack(line, size=10_000, wave_range=(-20, 20), rv='random', rv_lim
         _filters = [_filters]
     for _filter in _filters:
         filter_list.append(filters.Filter.from_str(_filter))
-    stack = spectrum.Stack(filters=filter_list)
+    stack = spectrum.Stack(filters=filter_list, progress_bar=progress_bar)
 
     def make_spec(A, sigma, seed):
         ispec = spectrum.Spectrum.simulated(line, wave_range, rv, rv_lim, vsini, vsini_lim, noise_std, noise_std_lim,
@@ -193,7 +203,8 @@ def quick_sim_stack(line, size=10_000, wave_range=(-20, 20), rv='random', rv_lim
         widths = np.array([0.1] * size)
     if seeds is None:
         seeds = [None] * size
-    specs = Parallel(n_jobs=n_jobs)(delayed(make_spec)(ai, wi, si) for ai, wi, si in tqdm.tqdm(zip(amplitudes, widths, seeds)))
+    range_ = tqdm.tqdm(zip(amplitudes, widths, seeds)) if progress_bar else zip(amplitudes, widths, seeds)
+    specs = Parallel(n_jobs=n_jobs)(delayed(make_spec)(ai, wi, si) for ai, wi, si in range_)
     for ispec in specs:
         stack.add_spec(ispec)
 

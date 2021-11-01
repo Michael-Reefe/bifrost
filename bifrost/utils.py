@@ -17,7 +17,16 @@ def get_filepaths_from_parent(parentdir, ftype):
     :return: list
         A list of filepaths to each file within parentdir of type ftype.
     """
-    files = glob.glob(os.path.join(parentdir, '**', '*.'+ftype), recursive=True)
+    if type(ftype) is str:
+        files = glob.glob(os.path.join(parentdir, '*', '*.'+ftype))
+        files.extend(glob.glob(os.path.join(parentdir, '*.'+ftype)))
+    elif type(ftype) is list:
+        files = []
+        for ft in ftype:
+            files.extend(glob.glob(os.path.join(parentdir, '*', '*.'+ft)))
+            files.extend(glob.glob(os.path.join(parentdir, '*.'+ft)))
+    else:
+        raise ValueError('invalid type for ftype: must be str or list')
     files.sort()
     return files
 

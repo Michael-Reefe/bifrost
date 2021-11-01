@@ -338,18 +338,30 @@ class Spectrum:
             for line in abslines:
                 fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#d1c779')
             if not normalized:
-                y_title = 'f<sub>&#955;</sub> (10<sup>-17</sup> erg cm<sup>-2</sup> s<sup>-1</sup> &#8491;<sup>-1</sup>)'
+                y_title = '$f_\\lambda\\ (10^{-17} {\\rm erg} {\\rm s}^{-1} {\\rm cm}^{-2} Å^{-1})$'
             else:
-                y_title = 'f<sub>&#955;</sub> (normalized)'
-            title = '%s, z=%.5f' % (self.name, self.redshift)
+                y_title = '$f_\\lambda\\ ({\\rm normalized})$'
+            title = '${\\rm %s}, z=%.5f$' % (self.name, self.redshift)
             if title_text:
                 title += ', ' + title_text
             fig.update_layout(
                 yaxis_title=y_title,
-                xaxis_title='&#955;<sub>rest</sub> (&#8491;)',
+                xaxis_title='$\\lambda_{\\rm rest}\\ (Å)$',
                 title=title,
-                hovermode='x'
+                hovermode='x',
+                template='plotly_white'
             )
+
+            fig.update_layout(
+                font_family="Georgia, Times New Roman, Serif",
+                # font_color="blue",
+                title_font_family="Georgia, Times New Roman, Serif",
+                # title_font_color="red",
+                # legend_title_font_color="green"
+            )
+            fig.update_xaxes(title_font_family="Georgia, Times New Roman, Serif")
+            fig.update_yaxes(title_font_family="Georgia, Times New Roman, Serif")
+
             fig.update_xaxes(
                 range=(np.nanmin(wave), np.nanmax(wave)),
                 constrain='domain'
@@ -358,8 +370,8 @@ class Spectrum:
                 range=(0, np.nanmax(spectrum)+.3) if not ylim else ylim,
                 constrain='domain'
             )
-            fig.write_html(fname)
-            # fig.write_image(fname.replace('.html', '.pdf'))
+            fig.write_html(fname, include_mathjax="cdn")
+            fig.write_image(fname.replace('.html', '.pdf'), width=1280, height=540)
 
     def save_pickle(self):
         """
@@ -727,7 +739,7 @@ class Spectra(dict):
 class Stack(Spectra):
 
     def __init__(self, universal_grid=None, stacked_flux=None, stacked_err=None, filters=None, r_v=3.1,
-                 gridspace=1, tolerance=500, norm_region=None, wave_criterion='strict'):
+                 gridspace=1, tolerance=500, norm_region=None, wave_criterion='strict', progress_bar=True):
         """
         An extension of the Spectra class (and by extension, the dictionary) specifically for stacking purposes.
 
@@ -755,6 +767,8 @@ class Stack(Spectra):
                 'lenient': Do not delete any spectra.  Stack over the entire region, using the full range of spectra that
                 have wavelength coverage in different parts of the spectrum.  Will result in a stack with a different
                 number of constituent spectra at different wavelength positions.
+        :param progress_bar: bool
+            If True, shows progress bars for stacking procedures.  Default is False.
         """
         # Fill in instance attributes
         self.r_v = r_v
@@ -772,6 +786,7 @@ class Stack(Spectra):
                 if type(filters[i]) is str:
                     filters[i] = bfilters.Filter.from_str(filters[i])
         self.filters = filters
+        self.progress_bar = progress_bar
         # Default object properties that will be filled in later
         if not universal_grid:
             universal_grid = []
@@ -1008,9 +1023,9 @@ class Stack(Spectra):
             mesh = ax.pcolormesh(edgex, edgey, z_array, shading='flat', cmap=colormap)
 
             if not labels:
-                xlabel = binx if not logx else '$\\log_{10}($' + binx + '$)$'
-                ylabel = biny if not logy else '$\\log_{10}($' + biny + '$)$'
-                zlabel = binz if not logz else '$\\log_{10}($' + binz + '$)$'
+                xlabel = binx if not logx else '$\\log($' + binx + '$)$'
+                ylabel = biny if not logy else '$\\log($' + biny + '$)$'
+                zlabel = binz if not logz else '$\\log($' + binz + '$)$'
             else:
                 xlabel, ylabel, zlabel = labels
             fig.colorbar(mesh, ax=ax, label=zlabel)
@@ -1030,9 +1045,9 @@ class Stack(Spectra):
             if not colormap:
                 colormap = 'plasma'
             if not labels:
-                xlabel = binx if not logx else 'log<sub>10</sub>(' + binx + ')'
-                ylabel = biny if not logy else 'log<sub>10</sub>(' + biny + ')'
-                zlabel = binz if not logz else 'log<sub>10</sub>(' + binz + ')'
+                xlabel = binx if not logx else '$\\log(' + binx + ')$'
+                ylabel = biny if not logy else '$\\log(' + biny + ')$'
+                zlabel = binz if not logz else '$\\log(' + binz + ')$'
             else:
                 xlabel, ylabel, zlabel = labels
             fig = plotly.graph_objects.Figure(
@@ -1070,12 +1085,24 @@ class Stack(Spectra):
                 ticklen=10,
                 title_text=xlabel
             )
+
+            fig.update_layout(
+                template='plotly_white',
+                font_family="Georgia, Times New Roman, Serif",
+                # font_color="blue",
+                title_font_family="Georgia, Times New Roman, Serif",
+                # title_font_color="red",
+                # legend_title_font_color="green"
+            )
+            fig.update_xaxes(title_font_family="Georgia, Times New Roman, Serif")
+            fig.update_yaxes(title_font_family="Georgia, Times New Roman, Serif")
+
             # fig.update_layout(
                 # paper_bgcolor='rgba(0,0,0,0)',
                 # plot_bgcolor='rgba(0,0,0,0)'
             # )
-            fig.write_html(fname_base+'.html')
-            # fig.write_image(fname_base+'.pdf')
+            fig.write_html(fname_base+'.html', include_mathjax="cdn")
+            fig.write_image(fname_base+'.pdf')
 
     def kewley_agn_class(self, bpt_1, bpt_2):
         for i, ispec in enumerate(self):
@@ -1373,10 +1400,12 @@ class Stack(Spectra):
         """
         print('Resampling spectra over a uniform wave grid...')
         ss = binned_spec if binned_spec is not None else [s for s in self]
-        for ispec in tqdm.tqdm(ss):
+        range_ = tqdm.tqdm(ss) if self.progress_bar else ss
+        for ispec in range_:
             self[ispec].flux, self[ispec].error = maths.spectres(wave_grid, self[ispec].wave, self[ispec].flux, self[ispec].error, fill=np.nan,
                                                                  verbose=False if self.wave_criterion == 'lenient' else True)
             self[ispec].wave = wave_grid
+        print('Done.')
 
     def normalize(self, wave_grid, norm_region, binned_spec=None):
         """
@@ -1392,8 +1421,10 @@ class Stack(Spectra):
         # Use the first spectra's wave since by this point they should all be equal anyways, to calculate the region to fit
         reg = np.where((norm_region[0] < wave_grid) & (wave_grid < norm_region[1]))[0]
         ss = binned_spec if binned_spec is not None else [s for s in self]
-        for ispec in tqdm.tqdm(ss):
+        range_ = tqdm.tqdm(ss) if self.progress_bar else ss
+        for ispec in range_:
             self[ispec].flux, self[ispec].error = self._norm(self[ispec].flux, self[ispec].error, reg)
+        print('Done.')
 
     @staticmethod
     @njit
@@ -1441,7 +1472,8 @@ class Stack(Spectra):
             specnames_e = np.ndarray(wave_grid.size, dtype=object)
             Nspec_f = np.zeros_like(wave_grid)
             Nspec_e = np.zeros_like(wave_grid)
-        for i in tqdm.trange(len(wave_grid)):
+        range_ = tqdm.trange(len(wave_grid)) if self.progress_bar else range(len(wave_grid))
+        for i in range_:
             flux_i = np.array([self[name].flux[i] for name in ss])
             err_i = np.array([self[name].error[i] for name in ss])
             if save_specnames:
@@ -1455,6 +1487,7 @@ class Stack(Spectra):
                 stacked_flux[i], stacked_err[i] = flux_i, err_i
 
         good = np.where(np.isfinite(stacked_flux) & np.isfinite(stacked_err))[0]
+        print('Done.')
         if save_specnames:
             return wave_grid[good], stacked_flux[good], stacked_err[good], specnames_f[good], specnames_e[good], Nspec_f[good], Nspec_e[good]
         else:
@@ -1474,6 +1507,7 @@ class Stack(Spectra):
         # stacked_err = np.sqrt(1/np.nansum(weights))
         return stacked_flux, stacked_err
 
+    @utils.timer(name='Line Flux Integration')
     def calc_line_flux_ratios(self, line, dw=5, norm_dw=100, save=False, conf=None, path=''):
         """
         Calculate the integrated flux ratios of each spectra compared to the stacked spectrum.
@@ -1511,7 +1545,8 @@ class Stack(Spectra):
             else:
                 ss = self
             print('Calculating relative line flux ratios...')
-            for ispec in tqdm.tqdm(ss):
+            range_ = tqdm.tqdm(ss) if self.progress_bar else ss
+            for ispec in range_:
                 good = np.isfinite(self[ispec].wave) & np.isfinite(self[ispec].flux) & np.isfinite(self[ispec].error)
                 region = (line-dw < self[ispec].wave) & (self[ispec].wave < line+dw)
                 bad = ~np.isfinite(self[ispec].error) | ~np.isfinite(self[ispec].flux) | ~np.isfinite(self[ispec].wave)
@@ -1525,6 +1560,7 @@ class Stack(Spectra):
                 out[i][ispec] = (intflux/baseline, err/baseline)
                 if conf:
                     confs[i][ispec] = self[ispec].data[conf]
+            print('Done.')
 
         if save:
             serialized = json.dumps(out, indent=4)
@@ -1641,7 +1677,7 @@ class Stack(Spectra):
                 fig = plotly.subplots.make_subplots(rows=1, cols=1)
                 linewidth = .5
                 if self.wave_criterion == 'lenient':
-                    fig.add_trace(plotly.graph_objects.Heatmap(x=wave, y=[0]*wave.size, z=self.nspec_f[bin_num],
+                    fig.add_trace(plotly.graph_objects.Heatmap(x=wave, y=np.array([0]*len(wave)), z=self.nspec_f[bin_num],
                                   colorbar=dict(title='Number of spectra'),
                                   name='Number of Spectra', showlegend=False))
                     text = [str(self.nspec_f[bin_num][i]) for i in range(len(self.nspec_f[bin_num]))]
@@ -1651,7 +1687,7 @@ class Stack(Spectra):
                     raise ValueError('invalid value for self.wave_criterion!')
                 fig.add_trace(plotly.graph_objects.Scatter(x=wave, y=flux, line=dict(color='black', width=linewidth),
                                                            name='Data', showlegend=False, text=text,
-                                                           hovertemplate='%{y} <b>Number of Spectra:</b>%{text}'))
+                                                           hovertemplate='%{y} <b>Number of Spectra:</b> %{text}'))
                 fig.add_trace(plotly.graph_objects.Scatter(x=wave, y=flux+err,
                                                            line=dict(color='#60dbbd', width=0), fillcolor='rgba(96, 219, 189, 0.6)',
                                                            name='Upper Bound', showlegend=False, hovertemplate='%{y}'))
@@ -1682,21 +1718,33 @@ class Stack(Spectra):
                     fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#d1c779')
                 title = 'Stacked Spectra'
                 fig.update_layout(
-                    yaxis_title='f<sub>&#955;</sub> (normalized)',
-                    xaxis_title='&#955;<sub>rest</sub> (&#8491;)',
+                    yaxis_title='$f_{\\lambda}\\ ({\\rm normalized})$',
+                    xaxis_title='$\\lambda_{\\rm rest}\\ (Å)$',
                     title=title,
-                    hovermode='x unified'
+                    hovermode='x unified',
+                    template='plotly_white'
                 )
+
+                fig.update_layout(
+                    font_family="Georgia, Times New Roman, Serif",
+                    # font_color="blue",
+                    title_font_family="Georgia, Times New Roman, Serif",
+                    # title_font_color="red",
+                    # legend_title_font_color="green"
+                )
+                fig.update_xaxes(title_font_family="Georgia, Times New Roman, Serif")
+                fig.update_yaxes(title_font_family="Georgia, Times New Roman, Serif")
+
                 fig.update_xaxes(
                     range=(np.nanmin(wave), np.nanmax(wave)),
                     constrain='domain'
                 )
                 fig.update_yaxes(
-                    range=(0, np.nanmax(flux)+.3),
+                    range=(0, np.nanmax(flux)+err[np.nanargmax(flux)]+.3),
                     constrain='domain'
                 )
-                fig.write_html(fname)
-                # fig.write_image(fname.replace('.html', '.pdf'))
+                fig.write_html(fname, include_mathjax="cdn")
+                fig.write_image(fname.replace('.html', '.pdf'), width=1280, height=540)
 
     def plot_spectra(self, fname_root, spectra='all', range=None, ylim=None, title_text=None, backend='plotly'):
         """
@@ -1709,12 +1757,14 @@ class Stack(Spectra):
             os.makedirs(fname_root)
         if (type(spectra) is str):
             if spectra == 'all':
-                for item in tqdm.tqdm(self):
+                range_ = tqdm.tqdm(self) if self.progress_bar else self
+                for item in range_:
                     ttl = None if title_text is None else title_text[item]
                     self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum'+format),
                                     normalized=True, backend=backend, range=range, ylim=ylim, title_text=ttl)
         else:
-            for item in tqdm.tqdm(self):
+            range_ = tqdm.tqdm(self) if self.progress_bar else self
+            for item in range_:
                 if item in spectra:
                     if item not in self or item not in title_text:
                         print(f'WARNING: {item} not found in stack!')
@@ -1722,6 +1772,7 @@ class Stack(Spectra):
                     ttl = None if title_text is None else title_text[item]
                     self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum'+format),
                               normalized=True, backend=backend, range=range, ylim=ylim, title_text=ttl)
+        print('Done.')
 
     def plot_hist(self, fname_base, plot_log=False, backend='plotly'):
         """
@@ -1754,7 +1805,7 @@ class Stack(Spectra):
             fig = plotly.graph_objects.Figure(data=plotly.graph_objects.Bar(x=midpts, y=self.bin_counts))
             fig.update_traces(marker_color='rgb(158,202,225)', marker_line_color='rgb(8,48,107)',
                               marker_line_width=0.0, opacity=0.8)
-            xlabel = 'log<sub>10</sub>(' + self.binned + ')' if self.bin_log else self.binned
+            xlabel = '$\\log(' + self.binned + ')$' if self.bin_log else self.binned
             fig.update_layout(
                 xaxis_title=xlabel,
                 yaxis_title='Number in bin',
@@ -1762,14 +1813,26 @@ class Stack(Spectra):
                 xaxis=dict(
                     tickmode='array',
                     tickvals=self.bin_edges
-                )
+                ),
+                template='plotly_white'
             )
+
+            fig.update_layout(
+                font_family="Georgia, Times New Roman, Serif",
+                # font_color="blue",
+                title_font_family="Georgia, Times New Roman, Serif",
+                # title_font_color="red",
+                # legend_title_font_color="green"
+            )
+            fig.update_xaxes(title_font_family="Georgia, Times New Roman, Serif")
+            fig.update_yaxes(title_font_family="Georgia, Times New Roman, Serif")
+
             if plot_log:
                 fig.update_yaxes(
                     type="log",
                 )
-            fig.write_html(fname)
-            # fig.write_image(fname.replace('.html', '.pdf'))
+            fig.write_html(fname, include_mathjax="cdn")
+            fig.write_image(fname.replace('.html', '.pdf'))
 
     def plot_agn(self, fname_base, bpt_x, bpt_y, bpt_xerr=None, bpt_yerr=None, labels=None, backend='plotly'):
         """
@@ -1832,8 +1895,20 @@ class Stack(Spectra):
             fig.update_layout(
                 xaxis_title=xl,
                 yaxis_title=yl,
-                title='Reference point: ({:.5f},{:.5f})'.format(*self.agn_ref_pt)
+                title='Reference point: ({:.5f},{:.5f})'.format(*self.agn_ref_pt),
+                template='plotly_white'
             )
+
+            fig.update_layout(
+                font_family="Georgia, Times New Roman, Serif",
+                # font_color="blue",
+                title_font_family="Georgia, Times New Roman, Serif",
+                # title_font_color="red",
+                # legend_title_font_color="green"
+            )
+            fig.update_xaxes(title_font_family="Georgia, Times New Roman, Serif")
+            fig.update_yaxes(title_font_family="Georgia, Times New Roman, Serif")
+
             fig.update_yaxes(
                 range=(np.nanmin(y)-0.05, np.nanmax(y)+0.05),
                 constrain='domain'
@@ -1842,8 +1917,8 @@ class Stack(Spectra):
                 range=(np.nanmin(x)-0.05, np.nanmax(x)+0.05),
                 constrain='domain'
             )
-            fig.write_html(fname)
-            # fig.write_image(fname.replace('.html', '.pdf'))
+            fig.write_html(fname, include_mathjax="cdn")
+            fig.write_image(fname.replace('.html', '.pdf'))
 
     def line_flux_report(self, fluxr_dict, line=6374, dw=10, norm_dw=100, ratio_target=1, plot_backend='plotly', path='',
                               agn_diagnostics=False, ylim=None, title_text_conf=None, title_text_snr=None,
@@ -1923,6 +1998,11 @@ class Stack(Spectra):
                     file.write('fp: ' + str(nfp) + ', med SNR: ' + str(fpsnr) + '\n')
                     file.write('tn: ' + str(ntn) + ', med SNR: ' + str(tnsnr) + '\n')
                     file.write('fn: ' + str(nfn) + ', med SNR: ' + str(fnsnr) + '\n')
+            else:
+                with open(os.path.join(path, 'report_'+utils.gen_datestr(True)+'.txt'), 'w') as file:
+                    file.write('number integrated: ' + str(len(specnames)) + '\n')
+                    file.write('detections: ' + str(len(specnames[w])) + '\n')
+                    file.write('non-detections: ' + str(len(specnames)-len(specnames[w])) + '\n')
             if plot_spec != 'none':
                 if plot_spec == 'sorted':
                     tp = np.where((ratios >= ratio_target) & (confidences >= conf_target))[0]
@@ -2107,6 +2187,7 @@ class Stack(Spectra):
                     yaxis=dict(type='log'),
                     yaxis_title_text='Number in bin',
                     xaxis_title_text='Line flux / stacked line flux',
+                    template='plotly_white'
                     # title_text='Stacked line flux $= %.3f \\times 10^{-17}$ erg s$^{-1}$ cm$^{-2}$' % stack_fluxes[k],
                 )
                 linewidth = .5
@@ -2191,8 +2272,18 @@ class Stack(Spectra):
                                   x1=line+dw, y1=maxy, fillcolor='lightgrey', opacity=0.5,
                                   line_width=0, layer='below')
 
-                fig.write_html(path+os.sep+'line_flux_ratios_'+str(k)+'.html')
-                # fig.write_image(path+os.sep+'line_flux_ratios_'+str(k)+'.pdf')
+                fig.update_layout(
+                    font_family="Georgia, Times New Roman, Serif",
+                    # font_color="blue",
+                    title_font_family="Georgia, Times New Roman, Serif",
+                    # title_font_color="red",
+                    # legend_title_font_color="green"
+                )
+                fig.update_xaxes(title_font_family="Georgia, Times New Roman, Serif")
+                fig.update_yaxes(title_font_family="Georgia, Times New Roman, Serif")
+
+                fig.write_html(path+os.sep+'line_flux_ratios_'+str(k)+'.html', include_mathjax="cdn")
+                fig.write_image(path+os.sep+'line_flux_ratios_'+str(k)+'.pdf')
 
             if conf_dict:
                 confidences = []
@@ -2230,13 +2321,26 @@ class Stack(Spectra):
                     fig.add_trace(plotly.graph_objects.Scatter(x=x_model, y=y_model, line=dict(color='black', width=.5, dash='dash'),
                                                                showlegend=False))
                     fig.update_layout(
+                        template='plotly_white',
                         title='Linear Least Squares Fit: m=%.3f, b=%.3f' % (m, c),
                         xaxis_title='Confidence Level',
-                        yaxis_title='Line Flux Ratio Parameter <em>F</em>',
+                        yaxis_title='${\\rm Line Flux Ratio Parameter}\\ \\mathcal{F}$',
                         # yaxis_range=(-10, 10),
                         # yaxis_constrain='domain'
                     )
-                    fig.write_html(path+os.sep+'line_flux_confidence_covar_'+str(k)+'.html')
+
+                    fig.update_layout(
+                        font_family="Georgia, Times New Roman, Serif",
+                        # font_color="blue",
+                        title_font_family="Georgia, Times New Roman, Serif",
+                        # title_font_color="red",
+                        # legend_title_font_color="green"
+                    )
+                    fig.update_xaxes(title_font_family="Georgia, Times New Roman, Serif")
+                    fig.update_yaxes(title_font_family="Georgia, Times New Roman, Serif")
+
+                    fig.write_html(path+os.sep+'line_flux_confidence_covar_'+str(k)+'.html', include_mathjax="cdn")
+                    fig.write_image(path+os.sep+'line_flux_confidence_covar_'+str(k)+'.pdf')
 
         else:
             raise NotImplementedError
@@ -2258,6 +2362,32 @@ class Stack(Spectra):
             serializable = serializable.__dict__
             serialized = json.dumps(serializable, indent=4)
             handle.write(serialized)
+
+    def save_fits(self, filepath, bin_num=(0,)):
+        """
+        Save the stacked spectrum for a specific bin to a FITS file.
+
+        :param filepath: str
+            The filepath to save to.
+        :param bin_num: tuple
+            Which bins to save.  Default is (0,).
+        :return:
+        """
+        hdu = astropy.io.fits.HDUList()
+        for b in bin_num:
+            header = astropy.io.fits.Header()
+            # Spectrum has already been corrected for redshift and extinction, so make these 0
+            header['z'] = 0.
+            header['ebv'] = 0.
+            # Rem: "Since we aren't really concerned with the exact values of these quantities
+            # (since we're dealing with stacks, their actual kinematic quantities are meaningless),
+            # you can set the FWHM resolution to something small like 0.1 A. "
+            header['fwhm'] = 0.1
+            hdu.append(astropy.io.fits.PrimaryHDU(data=self.stacked_flux[b], header=header))
+            hdu.append(astropy.io.fits.PrimaryHDU(data=self.universal_grid[b]))
+            hdu.append(astropy.io.fits.PrimaryHDU(data=self.stacked_err[b]))
+        hdu.writeto(filepath)
+        return hdu
 
     def __repr__(self):
         s = f"A collection of {len(self)} stacked spectra.\n"
