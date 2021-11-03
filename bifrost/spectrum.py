@@ -201,7 +201,8 @@ class Spectrum:
         return self.data["agn_class"]
 
     def plot(self, convolve_width=0, emline_color="rebeccapurple", absorp_color="darkgoldenrod", cline_color="cyan",
-             overwrite=False, fname=None, backend='plotly', range=None, ylim=None, normalized=False, title_text=None):
+             overwrite=False, fname=None, backend='plotly', range=None, ylim=None, normalized=False, title_text=None,
+             plot_model=None):
         """
         Plot the spectrum.
 
@@ -228,6 +229,8 @@ class Spectrum:
             Default is false.
         :param title_text: optional, str
             Text to append to the title of the plot.
+        :param plot_model: optional, tuple
+            A tuple of two strings corresponding to keys for the data dict to plot x and y data overtop of the spectrum.
         :return None:
         """
         # Make sure corrections have been applied
@@ -261,6 +264,11 @@ class Spectrum:
             linewidth = .5
             linestyle = '--'
             ax.plot(wave, spectrum, '-', color='k', lw=linewidth)
+            if plot_model:
+                if plot_model[0] in self.data and plot_model[1] in self.data:
+                    ax.plot(self.data[plot_model[0]], self.data[plot_model[1]], '-', color='r', lw=linewidth)
+                else:
+                    print(f"WARNING: {plot_model[0]} or {plot_model[1]} not found in {self.name}'s data!")
             ax.fill_between(wave, spectrum-error, spectrum+error, color='mediumaquamarine', alpha=0.5)
 
             # Plot emission and absorption lines
@@ -318,6 +326,12 @@ class Spectrum:
             fig.add_trace(plotly.graph_objects.Scatter(x=wave, y=spectrum-error,
                                                        line=dict(color='#60dbbd', width=0), fillcolor='rgba(96, 219, 189, 0.6)',
                                                        fill='tonexty', name='Lower Bound', showlegend=False))
+            if plot_model:
+                if plot_model[0] in self.data and plot_model[1] in self.data:
+                    fig.add_trace(plotly.graph_objects.Scatter(x=self.data[plot_model[0]], y=self.data[plot_model[1]],
+                                                               line=dict(color='#e0191c', width=linewidth), name='Model', showlegend=False))
+                else:
+                    print(f"WARNING: {plot_model[0]} or {plot_model[1]} not found in {self.name}'s data!")
             emlines = np.array([1033.820, 1215.240, 1240.810, 1305.530, 1335.310, 1397.610, 1399.800, 1549.480, 1640.400,
                                 1665.850, 1857.400, 1908.734, 2326.000, 2439.500, 2799.117, 3346.790, 3426.850, 3727.092,
                                 3729.875, 4102.890, 4341.680, 4364.436, 4862.680, 4960.295, 5008.240, 6300.304, 6363.776,
@@ -371,7 +385,7 @@ class Spectrum:
                 constrain='domain'
             )
             fig.write_html(fname, include_mathjax="cdn")
-            fig.write_image(fname.replace('.html', '.pdf'), width=1280, height=540)
+            # fig.write_image(fname.replace('.html', '.pdf'), width=1280, height=540)
 
     def save_pickle(self):
         """
@@ -611,7 +625,8 @@ class Spectra(dict):
             for item, r_vi in zip(self, r_v):
                 self[item].apply_corrections(r_v=r_vi)
 
-    def plot_spectra(self, fname_root, spectra='all', range=None, ylim=None, title_text=None, backend='plotly'):
+    def plot_spectra(self, fname_root, spectra='all', range=None, ylim=None, title_text=None, backend='plotly',
+                     plot_model=None):
         """
         Plot a series of spectra from the dictionary.
 
@@ -639,7 +654,7 @@ class Spectra(dict):
                 for item in tqdm.tqdm(self):
                     ttl = None if title_text is None else title_text[item]
                     self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum'+format),
-                                    backend=backend, range=range, ylim=ylim, title_text=ttl)
+                                    backend=backend, range=range, ylim=ylim, title_text=ttl, plot_model=plot_model)
         else:
             for item in tqdm.tqdm(self):
                 if item in spectra:
@@ -648,7 +663,7 @@ class Spectra(dict):
                         continue
                     ttl = None if title_text is None else title_text[item]
                     self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum'+format),
-                              backend=backend, range=range, ylim=ylim, title_text=ttl)
+                              backend=backend, range=range, ylim=ylim, title_text=ttl, plot_model=plot_model)
 
     def get_spec_index(self, name):
         """
@@ -1534,32 +1549,33 @@ class Stack(Spectra):
         self._renorm_stack((line-norm_dw, line+norm_dw))
         for i in range(len(self.universal_grid)):
             print(f"BIN {i+1} of {len(self.universal_grid)}...")
-            cspline_stack = scipy.interpolate.CubicSpline(self.universal_grid[i], self.stacked_flux[i],
-                                                          extrapolate=False)
-
-            baseline, err = scipy.integrate.quad(cspline_stack.__call__, line-dw, line+dw)
-            out[i] = {"stack": (baseline, err)}
-            confs[i] = {}
-            if self.binned_spec:
-                ss = self.binned_spec[i]
-            else:
-                ss = self
-            print('Calculating relative line flux ratios...')
-            range_ = tqdm.tqdm(ss) if self.progress_bar else ss
-            for ispec in range_:
-                good = np.isfinite(self[ispec].wave) & np.isfinite(self[ispec].flux) & np.isfinite(self[ispec].error)
-                region = (line-dw < self[ispec].wave) & (self[ispec].wave < line+dw)
-                bad = ~np.isfinite(self[ispec].error) | ~np.isfinite(self[ispec].flux) | ~np.isfinite(self[ispec].wave)
-                if len(np.where(bad & region)[0]) >= 3:
-                    print(f"WARNING: {ispec} spectrum has undefined datapoints in the line region!  "
-                          f"Cannot calculate relative line flux.")
-                    continue
-                good = np.where(good)[0]
-                csplinei = scipy.interpolate.CubicSpline(self[ispec].wave[good], self[ispec].flux[good], extrapolate=False)
-                intflux, erri = scipy.integrate.quad(csplinei.__call__, line-dw, line+dw)
-                out[i][ispec] = (intflux/baseline, err/baseline)
-                if conf:
-                    confs[i][ispec] = self[ispec].data[conf]
+            # print(f"BIN {i+1} of {len(self.universal_grid)}...")
+            # cspline_stack = scipy.interpolate.CubicSpline(self.universal_grid[i], self.stacked_flux[i],
+            #                                               extrapolate=False)
+            #
+            # baseline, err = scipy.integrate.quad(cspline_stack.__call__, line-dw, line+dw)
+            # out[i] = {"stack": (baseline, err)}
+            # confs[i] = {}
+            # if self.binned_spec:
+            #     ss = self.binned_spec[i]
+            # else:
+            #     ss = self
+            # print('Calculating relative line flux ratios...')
+            # range_ = tqdm.tqdm(ss) if self.progress_bar else ss
+            # for ispec in range_:
+            #     good = np.isfinite(self[ispec].wave) & np.isfinite(self[ispec].flux) & np.isfinite(self[ispec].error)
+            #     region = (line-dw < self[ispec].wave) & (self[ispec].wave < line+dw)
+            #     bad = ~np.isfinite(self[ispec].error) | ~np.isfinite(self[ispec].flux) | ~np.isfinite(self[ispec].wave)
+            #     if len(np.where(bad & region)[0]) >= 3:
+            #         print(f"WARNING: {ispec} spectrum has undefined datapoints in the line region!  "
+            #               f"Cannot calculate relative line flux.")
+            #         continue
+            #     good = np.where(good)[0]
+            #     csplinei = scipy.interpolate.CubicSpline(self[ispec].wave[good], self[ispec].flux[good], extrapolate=False)
+            #     intflux, erri = scipy.integrate.quad(csplinei.__call__, line-dw, line+dw)
+            #     out[i][ispec] = (intflux/baseline, err/baseline)
+            #     if conf:
+            #         confs[i][ispec] = self[ispec].data[conf]
             print('Done.')
 
         if save:
@@ -1746,7 +1762,8 @@ class Stack(Spectra):
                 fig.write_html(fname, include_mathjax="cdn")
                 fig.write_image(fname.replace('.html', '.pdf'), width=1280, height=540)
 
-    def plot_spectra(self, fname_root, spectra='all', range=None, ylim=None, title_text=None, backend='plotly'):
+    def plot_spectra(self, fname_root, spectra='all', range=None, ylim=None, title_text=None, backend='plotly',
+                     plot_model=None):
         """
         Spectra.plot_spectra but incorporates the information from self.normalized.
 
@@ -1761,7 +1778,7 @@ class Stack(Spectra):
                 for item in range_:
                     ttl = None if title_text is None else title_text[item]
                     self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum'+format),
-                                    normalized=True, backend=backend, range=range, ylim=ylim, title_text=ttl)
+                                    normalized=True, backend=backend, range=range, ylim=ylim, title_text=ttl, plot_model=plot_model)
         else:
             range_ = tqdm.tqdm(self) if self.progress_bar else self
             for item in range_:
@@ -1771,7 +1788,7 @@ class Stack(Spectra):
                         continue
                     ttl = None if title_text is None else title_text[item]
                     self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum'+format),
-                              normalized=True, backend=backend, range=range, ylim=ylim, title_text=ttl)
+                              normalized=True, backend=backend, range=range, ylim=ylim, title_text=ttl, plot_model=plot_model)
         print('Done.')
 
     def plot_hist(self, fname_base, plot_log=False, backend='plotly'):
