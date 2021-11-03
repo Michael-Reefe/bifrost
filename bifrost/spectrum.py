@@ -1549,33 +1549,32 @@ class Stack(Spectra):
         self._renorm_stack((line-norm_dw, line+norm_dw))
         for i in range(len(self.universal_grid)):
             print(f"BIN {i+1} of {len(self.universal_grid)}...")
-            # print(f"BIN {i+1} of {len(self.universal_grid)}...")
-            # cspline_stack = scipy.interpolate.CubicSpline(self.universal_grid[i], self.stacked_flux[i],
-            #                                               extrapolate=False)
-            #
-            # baseline, err = scipy.integrate.quad(cspline_stack.__call__, line-dw, line+dw)
-            # out[i] = {"stack": (baseline, err)}
-            # confs[i] = {}
-            # if self.binned_spec:
-            #     ss = self.binned_spec[i]
-            # else:
-            #     ss = self
-            # print('Calculating relative line flux ratios...')
-            # range_ = tqdm.tqdm(ss) if self.progress_bar else ss
-            # for ispec in range_:
-            #     good = np.isfinite(self[ispec].wave) & np.isfinite(self[ispec].flux) & np.isfinite(self[ispec].error)
-            #     region = (line-dw < self[ispec].wave) & (self[ispec].wave < line+dw)
-            #     bad = ~np.isfinite(self[ispec].error) | ~np.isfinite(self[ispec].flux) | ~np.isfinite(self[ispec].wave)
-            #     if len(np.where(bad & region)[0]) >= 3:
-            #         print(f"WARNING: {ispec} spectrum has undefined datapoints in the line region!  "
-            #               f"Cannot calculate relative line flux.")
-            #         continue
-            #     good = np.where(good)[0]
-            #     csplinei = scipy.interpolate.CubicSpline(self[ispec].wave[good], self[ispec].flux[good], extrapolate=False)
-            #     intflux, erri = scipy.integrate.quad(csplinei.__call__, line-dw, line+dw)
-            #     out[i][ispec] = (intflux/baseline, err/baseline)
-            #     if conf:
-            #         confs[i][ispec] = self[ispec].data[conf]
+            cspline_stack = scipy.interpolate.CubicSpline(self.universal_grid[i], self.stacked_flux[i],
+                                                          extrapolate=False)
+
+            baseline, err = scipy.integrate.quad(cspline_stack.__call__, line-dw, line+dw)
+            out[i] = {"stack": (baseline, err)}
+            confs[i] = {}
+            if self.binned_spec:
+                ss = self.binned_spec[i]
+            else:
+                ss = self
+            print('Calculating relative line flux ratios...')
+            range_ = tqdm.tqdm(ss) if self.progress_bar else ss
+            for ispec in range_:
+                good = np.isfinite(self[ispec].wave) & np.isfinite(self[ispec].flux) & np.isfinite(self[ispec].error)
+                region = (line-dw < self[ispec].wave) & (self[ispec].wave < line+dw)
+                bad = ~np.isfinite(self[ispec].error) | ~np.isfinite(self[ispec].flux) | ~np.isfinite(self[ispec].wave)
+                if len(np.where(bad & region)[0]) >= 3:
+                    print(f"WARNING: {ispec} spectrum has undefined datapoints in the line region!  "
+                          f"Cannot calculate relative line flux.")
+                    continue
+                good = np.where(good)[0]
+                csplinei = scipy.interpolate.CubicSpline(self[ispec].wave[good], self[ispec].flux[good], extrapolate=False)
+                intflux, erri = scipy.integrate.quad(csplinei.__call__, line-dw, line+dw)
+                out[i][ispec] = (intflux/baseline, err/baseline)
+                if conf:
+                    confs[i][ispec] = self[ispec].data[conf]
             print('Done.')
 
         if save:
