@@ -13,8 +13,8 @@ from bifrost import spectrum, utils, filters
 
 @utils.timer(name='Quick FITS Load')
 def quick_fits_stack(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=False, plot_backend='plotly',
-         plot_spec=None, limits=None, _filters=None, name_by='folder', properties_tbl=None, properties_comment='#',
-         properties_sep=',', properties_name_col=0, progress_bar=True):
+         plot_spec=None, limits=None, _filters=None, name_by='id', properties_tbl=None, properties_comment='#',
+         properties_sep=',', properties_name_col=0, progress_bar=True, stack_name='stacked_data'):
     """
     A convenience function for quickly creating a stack object from FITS files.
 
@@ -64,7 +64,8 @@ def quick_fits_stack(data_path, out_path=None, n_jobs=-1, save_pickle=True, save
         out_path = 'data.stacked.' + utils.gen_datestr(True)
     if not os.path.exists(out_path):
         os.makedirs(out_path)
-    out_path += os.sep
+    if out_path[-1] != os.sep:
+        out_path += os.sep
 
     # Gather spectra paths
     all_spectra = utils.get_filepaths_from_parent(data_path, ['fits', 'fit', 'fit.fz', 'fits.fz'])
@@ -81,10 +82,12 @@ def quick_fits_stack(data_path, out_path=None, n_jobs=-1, save_pickle=True, save
         filter_list.append(filters.Filter.from_str(_filter))
     stack = spectrum.Stack(filters=filter_list, progress_bar=progress_bar)
 
-    assert name_by in ('file', 'folder'), "name_by must be one of ['file', 'folder']"
+    assert name_by in ('file', 'folder', 'id'), "name_by must be one of ['file', 'folder', 'id']"
     def make_spec(filepath):
         name = None
-        if name_by == 'file':
+        if name_by == 'id':
+            name = None
+        elif name_by == 'file':
             name = filepath.split(os.sep)[-1]
         elif name_by == 'folder':
             name = filepath.split(os.sep)[-2]
@@ -108,7 +111,7 @@ def quick_fits_stack(data_path, out_path=None, n_jobs=-1, save_pickle=True, save
             properties_sep = [properties_sep] * len(properties_tbl)
         if type(properties_comment) is str:
             properties_comment = [properties_comment] * len(properties_tbl)
-        if type(properties_name_col) is int:
+        if type(properties_name_col) in (int, bool):
             properties_name_col = [properties_name_col] * len(properties_tbl)
         for tbl, sep, comm, name in zip(properties_tbl, properties_sep, properties_comment, properties_name_col):
             tbl_data = pd.read_csv(tbl, delimiter=sep, comment=comm,
@@ -116,19 +119,19 @@ def quick_fits_stack(data_path, out_path=None, n_jobs=-1, save_pickle=True, save
             range_ = tqdm.tqdm(tbl_data.index) if progress_bar else tbl_data.index
             for namei in range_:
                 # assert namei in stack.keys(), f"ERROR: {namei} not found in Stack!"
-                if str(namei) not in stack:
-                    print(f"WARNING: {namei} not found in stack!")
+                if str(int(namei)) not in stack:
+                    print(f"WARNING: {int(namei)} not found in stack!")
                     continue
                 for tbl_col in tbl_data.columns:
-                    stack[str(namei)].data[tbl_col] = tbl_data[tbl_col][namei]
+                    stack[str(int(namei))].data[tbl_col] = tbl_data[tbl_col][namei]
         print('Done.')
 
     if plot_spec:
         stack.plot_spectra(out_path, spectra=plot_spec, backend=plot_backend)
     if save_pickle:
-        stack.save_pickle(out_path+'stacked_data.pkl')
+        stack.save_pickle(out_path+stack_name+'.pkl')
     if save_json:
-        stack.save_json(out_path+'stacked_data.json')
+        stack.save_json(out_path+stack_name+'.json')
 
     return stack
 

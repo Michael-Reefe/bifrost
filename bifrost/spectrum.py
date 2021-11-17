@@ -142,11 +142,13 @@ class Spectrum:
 
     def calc_snr(self):
         if 'snr' not in self.data:
-            self.data['snr'] = 1 / np.mean(self.error[np.where(np.isfinite(self.error))[0]])
+            med = np.nanmedian(self.flux)
+            self.data['snr'] = 1 / np.mean(self.error[np.where(np.isfinite(self.error))[0]]/med)
 
     def calc_line_snr(self, wave_range, key):
         good = np.where(np.isfinite(self.error) & (wave_range[0] < self.wave) & (self.wave < wave_range[1]))[0]
-        self.data[key] = 1 / np.mean(self.error[good])
+        med = np.nanmedian(self.flux[good])
+        self.data[key] = 1 / np.mean(self.error[good]/med)
 
     @property
     def corrected(self):
@@ -202,7 +204,7 @@ class Spectrum:
 
     def plot(self, convolve_width=0, emline_color="rebeccapurple", absorp_color="darkgoldenrod", cline_color="cyan",
              overwrite=False, fname=None, backend='plotly', range=None, ylim=None, normalized=False, title_text=None,
-             plot_model=None):
+             plot_model=None, shade_reg=None):
         """
         Plot the spectrum.
 
@@ -307,11 +309,15 @@ class Spectrum:
                 title += ', ' + title_text
             ax.set_title(title, fontsize=fontsize)
             ax.tick_params(axis='both', labelsize=fontsize-2)
-            ax.set_xlim(np.nanmin(wave), np.nanmax(wave))
+            if wave.size > 1:
+                ax.set_xlim(np.nanmin(wave), np.nanmax(wave))
             if ylim:
                 ax.set_ylim(ylim)
-            else:
+            elif wave.size > 1:
                 ax.set_ylim(0., np.nanmax(spectrum))
+            if shade_reg:
+                for sr in shade_reg:
+                    ax.axvspan(*sr, color='grey', alpha=0.5)
 
             fig.savefig(fname, dpi=300, bbox_inches='tight')
             plt.close()
@@ -376,12 +382,18 @@ class Spectrum:
             fig.update_xaxes(title_font_family="Georgia, Times New Roman, Serif")
             fig.update_yaxes(title_font_family="Georgia, Times New Roman, Serif")
 
+            if wave.size > 1:
+                _range = (np.nanmin(wave), np.nanmax(wave))
+                _yrange = (0, np.nanmax(spectrum)+.3)
+            else:
+                _range=None
+                _yrange=None
             fig.update_xaxes(
-                range=(np.nanmin(wave), np.nanmax(wave)),
+                range=_range,
                 constrain='domain'
             )
             fig.update_yaxes(
-                range=(0, np.nanmax(spectrum)+.3) if not ylim else ylim,
+                range=_yrange if not ylim else ylim,
                 constrain='domain'
             )
             fig.write_html(fname, include_mathjax="cdn")
@@ -415,6 +427,8 @@ class Spectrum:
 
             specobj = hdu[2].data
             z = specobj['z'][0]
+            if name is None:
+                name = specobj['SPECOBJID'][0].strip()
             try:
                 ra = hdu[0].header['RA']
                 dec = hdu[0].header['DEC']
@@ -538,7 +552,7 @@ class Spectrum:
 
         rng = np.random.default_rng(seed)
         # Wavelength grid
-        wave = np.arange(true_line+wave_range[0]*2, true_line+wave_range[1]*2+0.1, 0.1)
+        wave = np.arange(true_line+wave_range[0]*2, true_line+wave_range[1]*2+0.1, 1)
 
         # Apply redshift first to avoid reinterpolating the flux
         if rv == 'random':
@@ -561,13 +575,34 @@ class Spectrum:
             noise_std = rng.uniform(*noise_std_lim)
         noise = rng.normal(0, noise_std, wave.size)
         flux += noise
-        noise = np.abs(noise)
-        snr = 1 / np.mean(noise)
+        error = np.array([np.std(flux-1)]*len(flux))
+        snr = 1 / np.std(flux-1)
 
         if name == 'auto':
             name = 'Sim_A{:.1f}_s{:d}_{:.3f}_{:.3f}_{:.3f}'.format(A, seed, rv, vsini, noise_std)
 
-        return cls(wave, flux, noise, redshift=z, name=name, amp=A, sigma=sigma, snr=snr)
+        return cls(wave, flux, error, redshift=z, name=name, amp=A, sigma=sigma, snr=snr)
+
+    def to_numpy(self, slice=None):
+        if slice is None:
+            return np.array([(w, f, e) for w, f, e in zip(self.wave, self.flux, self.error)],
+                             dtype=[('wave', float), ('flux', float), ('err', float)]).view(np.recarray)
+        else:
+            return np.array([(w, f, e) for w, f, e in zip(self.wave[slice], self.flux[slice], self.error[slice])],
+                             dtype=[('wave', float), ('flux', float), ('err', float)]).view(np.recarray)
+
+    def save_numpy(self, fname=None, compress=True, slice=None):
+        if not self.corrected:
+            self.apply_corrections()
+        record = self.to_numpy(slice=slice)
+        save = np.save if not compress else np.savez
+        if not fname:
+            if compress:
+                fname = self.name + '.npz'
+            else:
+                fname = self.name + '.npy'
+        save(fname, record)
+
 
 class Spectra(dict):
 
@@ -626,7 +661,7 @@ class Spectra(dict):
                 self[item].apply_corrections(r_v=r_vi)
 
     def plot_spectra(self, fname_root, spectra='all', range=None, ylim=None, title_text=None, backend='plotly',
-                     plot_model=None):
+                     plot_model=None, f=None, shade_reg=None):
         """
         Plot a series of spectra from the dictionary.
 
@@ -651,19 +686,37 @@ class Spectra(dict):
             os.makedirs(fname_root)
         if (type(spectra) is str):
             if spectra == 'all':
-                for item in tqdm.tqdm(self):
+                for i, item in enumerate(tqdm.tqdm(self)):
                     ttl = None if title_text is None else title_text[item]
-                    self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum'+format),
-                                    backend=backend, range=range, ylim=ylim, title_text=ttl, plot_model=plot_model)
+                    if range:
+                        good = np.where((self[item].wave > range[0]) & (self[item].wave < range[1]))[0]
+                        if good.size < 10:
+                            continue
+                    if f is not None:
+                        fname = os.path.join(fname_root, f'{f[i]:.3f}_'+self[item].name.replace(' ', '_')+'.spectrum'+format)
+                    else:
+                        fname = os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum'+format)
+                    self[item].plot(fname=fname,
+                                    backend=backend, range=range, ylim=ylim, title_text=ttl, plot_model=plot_model,
+                                    shade_reg=shade_reg)
         else:
-            for item in tqdm.tqdm(self):
+            for i, item in enumerate(tqdm.tqdm(self)):
                 if item in spectra:
                     if item not in self or item not in title_text:
                         print(f'WARNING: {item} not found in stack!')
                         continue
+                    if range:
+                        good = np.where((self[item].wave > range[0]) & (self[item].wave < range[1]))[0]
+                        if good.size < 10:
+                            continue
                     ttl = None if title_text is None else title_text[item]
-                    self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum'+format),
-                              backend=backend, range=range, ylim=ylim, title_text=ttl, plot_model=plot_model)
+                    if f is not None:
+                        fname = os.path.join(fname_root, f'{f[i]:.3f}_'+self[item].name.replace(' ', '_')+'.spectrum'+format)
+                    else:
+                        fname = os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum'+format)
+                    self[item].plot(fname=fname,
+                                    backend=backend, range=range, ylim=ylim, title_text=ttl, plot_model=plot_model,
+                                    shade_reg=shade_reg)
 
     def get_spec_index(self, name):
         """
@@ -1449,25 +1502,25 @@ class Stack(Spectra):
         error /= med
         return data, error
 
-    def _renorm_stack(self, norm_region):
-        """
-        Renormalize the stacked spectra and all individual spectra within each stack to a new normalization region.
-
-        :param norm_region: tuple
-            The new lower and upper limits for the region to normalize by.
-        :return None:
-        """
-        for i in range(len(self.stacked_flux)):
-            reg = np.where((norm_region[0] < self.universal_grid[i]) & (self.universal_grid[i] < norm_region[1]))[0]
-            med = np.nanmedian(self.stacked_flux[i][reg])
-            self.stacked_flux[i] /= med
-            if self.binned_spec:
-                ss = self.binned_spec[i]
-            else:
-                ss = self
-            for ispec in ss:
-                medi = np.nanmedian(self[ispec].flux[reg])
-                self[ispec].flux /= medi
+    # def _renorm_stack(self, norm_region):
+    #     """
+    #     Renormalize the stacked spectra and all individual spectra within each stack to a new normalization region.
+    #
+    #     :param norm_region: tuple
+    #         The new lower and upper limits for the region to normalize by.
+    #     :return None:
+    #     """
+    #     for i in range(len(self.stacked_flux)):
+    #         reg = np.where((norm_region[0] < self.universal_grid[i]) & (self.universal_grid[i] < norm_region[1]))[0]
+    #         med = np.nanmedian(self.stacked_flux[i][reg])
+    #         self.stacked_flux[i] /= med
+    #         if self.binned_spec:
+    #             ss = self.binned_spec[i]
+    #         else:
+    #             ss = self
+    #         for ispec in ss:
+    #             medi = np.nanmedian(self[ispec].flux[reg])
+    #             self[ispec].flux /= medi
 
     def coadd(self, wave_grid, binned_spec=None, save_specnames=False):
         """
@@ -1544,47 +1597,109 @@ class Stack(Spectra):
         """
         out = {}
         confs = {}
-        if len(self.universal_grid) == 0:
-            raise ValueError("Stacked spectrum has not yet been generated!")
-        self._renorm_stack((line-norm_dw, line+norm_dw))
-        for i in range(len(self.universal_grid)):
-            print(f"BIN {i+1} of {len(self.universal_grid)}...")
-            cspline_stack = scipy.interpolate.CubicSpline(self.universal_grid[i], self.stacked_flux[i],
-                                                          extrapolate=False)
+        out[0] = {}
+        confs[0] = {}
+        self.correct_spectra()
+        # if len(self.universal_grid) == 0:
+        #     raise ValueError("Stacked spectrum has not yet been generated!")
+        # self._renorm_stack((line-norm_dw, line+norm_dw))
 
-            baseline, err = scipy.integrate.quad(cspline_stack.__call__, line-dw, line+dw)
-            out[i] = {"stack": (baseline, err)}
-            confs[i] = {}
-            if self.binned_spec:
-                ss = self.binned_spec[i]
-            else:
-                ss = self
-            print('Calculating relative line flux ratios...')
-            range_ = tqdm.tqdm(ss) if self.progress_bar else ss
-            for ispec in range_:
-                good = np.isfinite(self[ispec].wave) & np.isfinite(self[ispec].flux) & np.isfinite(self[ispec].error)
-                region = (line-dw < self[ispec].wave) & (self[ispec].wave < line+dw)
-                bad = ~np.isfinite(self[ispec].error) | ~np.isfinite(self[ispec].flux) | ~np.isfinite(self[ispec].wave)
-                if len(np.where(bad & region)[0]) >= 3:
-                    print(f"WARNING: {ispec} spectrum has undefined datapoints in the line region!  "
-                          f"Cannot calculate relative line flux.")
-                    continue
-                good = np.where(good)[0]
-                csplinei = scipy.interpolate.CubicSpline(self[ispec].wave[good], self[ispec].flux[good], extrapolate=False)
-                intflux, erri = scipy.integrate.quad(csplinei.__call__, line-dw, line+dw)
-                out[i][ispec] = (intflux/baseline, err/baseline)
-                if conf:
-                    confs[i][ispec] = self[ispec].data[conf]
-            print('Done.')
+        range_ = tqdm.trange(len(self)) if self.progress_bar else range(len(self))
+        _wr = 30
+        _wl = 30
+        if (5275 < line < 5277):
+            _wr += 55
+        elif (5302 < line < 5304):
+            _wl += 30
+            _wr += 30
+        elif (5308 < line < 5310):
+            _wl += 30
+            _wr += 30
+        elif (5334 < line < 5336):
+            _wl += 55
+        elif (5719 < line < 5721):
+            _wr += 30
+        for i in range_:
+            # Define wavelength windows
+            window_center = (self[i].wave > line-dw) & (self[i].wave < line+dw)
+            window_left = (self[i].wave > line-dw-_wl) & (self[i].wave < line+dw-_wl)
+            window_right = (self[i].wave > line-dw+_wr) & (self[i].wave < line+dw+_wr)
+
+            if len(window_center) < int(2*dw) or len(window_left) < int(2*dw) or len(window_right) < int(2*dw):
+                print(f"WARNING: {self[i].name} spectrum does not have sufficient wavelength coverage in the integration region.")
+                continue
+            bad = ~np.isfinite(self[i].flux) | ~np.isfinite(self[i].wave)
+            if len(np.where(bad & window_center)[0]) >= 3 or len(np.where(bad & window_left)[0]) >= 3 or len(np.where(bad & window_right)[0]) >= 3:
+                print(f"WARNING: {self[i].name} spectrum does not have sufficient wavelength coverage in the integration region.")
+                continue
+            window_center = np.where(window_center)[0]
+            window_left = np.where(window_left)[0]
+            window_right = np.where(window_right)[0]
+
+            # Normalize stack in the region of interest
+            window_full = np.where((self[i].wave > line-dw-_wl) & (self[i].wave < line+dw+_wr))[0]
+            flux_norm, err_norm = self._norm(self[i].flux, self[i].error, window_full)
+
+            # Calculate a linear trend
+            mean_left = np.nanmean(flux_norm[window_left])
+            mean_right = np.nanmean(flux_norm[window_right])
+            slope = (mean_right-mean_left) / (_wl+_wr)
+            intercept = mean_left - slope*(line-_wl)
+
+            full_wave = self[i].wave[window_full]
+            y = slope*full_wave + intercept
+
+            # Detrend with the line
+            full_flux = flux_norm[window_full] - y
+
+            # Calculate mean / RMS
+            window_lr = np.where(((full_wave > line-dw-_wl) & (full_wave < line+dw-_wl)) | ((full_wave > line-dw+_wr) & (full_wave < line+dw+_wr)))[0]
+            window_center = np.where((full_wave > line-dw) & (full_wave < line+dw))[0]
+            rms = np.sqrt(np.mean(full_flux[window_lr]**2))
+
+            out[0][self[i].name] = (np.mean(full_flux[window_center]) / rms).astype(np.float64)
+            if conf:
+                confs[0][self[i].name] = self[i].data[conf]
+
+        # OLD INTEGRATION METHOD, DEPRECATED, COMPARING WITH STACK:
+        # for i in range(len(self.universal_grid)):
+        #     print(f"BIN {i+1} of {len(self.universal_grid)}...")
+        #     cspline_stack = scipy.interpolate.CubicSpline(self.universal_grid[i], self.stacked_flux[i],
+        #                                                   extrapolate=False)
+        #
+        #     baseline, err = scipy.integrate.quad(cspline_stack.__call__, line-dw, line+dw)
+        #     out[i] = {"stack": (baseline, err)}
+        #     confs[i] = {}
+        #     if self.binned_spec:
+        #         ss = self.binned_spec[i]
+        #     else:
+        #         ss = self
+        #     print('Calculating relative line flux ratios...')
+        #     range_ = tqdm.tqdm(ss) if self.progress_bar else ss
+        #     for ispec in range_:
+        #         good = np.isfinite(self[ispec].wave) & np.isfinite(self[ispec].flux) & np.isfinite(self[ispec].error)
+        #         region = (line-dw < self[ispec].wave) & (self[ispec].wave < line+dw)
+        #         bad = ~np.isfinite(self[ispec].error) | ~np.isfinite(self[ispec].flux) | ~np.isfinite(self[ispec].wave)
+        #         if len(np.where(bad & region)[0]) >= 3:
+        #             print(f"WARNING: {ispec} spectrum has undefined datapoints in the line region!  "
+        #                   f"Cannot calculate relative line flux.")
+        #             continue
+        #         good = np.where(good)[0]
+        #         csplinei = scipy.interpolate.CubicSpline(self[ispec].wave[good], self[ispec].flux[good], extrapolate=False)
+        #         intflux, erri = scipy.integrate.quad(csplinei.__call__, line-dw, line+dw)
+        #         out[i][ispec] = (intflux/baseline, err/baseline)
+        #         if conf:
+        #             confs[i][ispec] = self[ispec].data[conf]
+        #     print('Done.')
 
         if save:
             serialized = json.dumps(out, indent=4)
             with open(path + os.sep + 'line_flux_ratios_'+utils.gen_datestr(True)+'.json', 'w') as handle:
                 handle.write(serialized)
         if conf:
-            return out, confs
+            return _wl, _wr, out, confs
         else:
-            return out
+            return _wl, _wr, out
 
     def plot_stacked(self, fname_base, emline_color="rebeccapurple", absorp_color="darkgoldenrod", cline_color="cyan",
                      cline_labels='all', backend='plotly'):
@@ -1762,7 +1877,7 @@ class Stack(Spectra):
                 fig.write_image(fname.replace('.html', '.pdf'), width=1280, height=540)
 
     def plot_spectra(self, fname_root, spectra='all', range=None, ylim=None, title_text=None, backend='plotly',
-                     plot_model=None):
+                     plot_model=None, f=None, shade_reg=None):
         """
         Spectra.plot_spectra but incorporates the information from self.normalized.
 
@@ -1773,21 +1888,39 @@ class Stack(Spectra):
             os.makedirs(fname_root)
         if (type(spectra) is str):
             if spectra == 'all':
-                range_ = tqdm.tqdm(self) if self.progress_bar else self
-                for item in range_:
+                for i, item in enumerate(tqdm.tqdm(self)):
                     ttl = None if title_text is None else title_text[item]
-                    self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum'+format),
-                                    normalized=True, backend=backend, range=range, ylim=ylim, title_text=ttl, plot_model=plot_model)
+                    if range:
+                        good = np.where((self[item].wave > range[0]) & (self[item].wave < range[1]))[0]
+                        if good.size < 10:
+                            continue
+                    if f is not None:
+                        fname = os.path.join(fname_root,
+                                             f'{f[i]:.3f}_' + self[item].name.replace(' ', '_') + '.spectrum' + format)
+                    else:
+                        fname = os.path.join(fname_root, self[item].name.replace(' ', '_') + '.spectrum' + format)
+                    self[item].plot(fname=fname,
+                                    backend=backend, range=range, ylim=ylim, title_text=ttl, plot_model=plot_model,
+                                    shade_reg=shade_reg)
         else:
-            range_ = tqdm.tqdm(self) if self.progress_bar else self
-            for item in range_:
+            for i, item in enumerate(tqdm.tqdm(self)):
                 if item in spectra:
                     if item not in self or item not in title_text:
                         print(f'WARNING: {item} not found in stack!')
                         continue
+                    if range:
+                        good = np.where((self[item].wave > range[0]) & (self[item].wave < range[1]))[0]
+                        if good.size < 10:
+                            continue
                     ttl = None if title_text is None else title_text[item]
-                    self[item].plot(fname=os.path.join(fname_root, self[item].name.replace(' ', '_')+'.spectrum'+format),
-                              normalized=True, backend=backend, range=range, ylim=ylim, title_text=ttl, plot_model=plot_model)
+                    if f is not None:
+                        fname = os.path.join(fname_root,
+                                             f'{f[i]:.3f}_' + self[item].name.replace(' ', '_') + '.spectrum' + format)
+                    else:
+                        fname = os.path.join(fname_root, self[item].name.replace(' ', '_') + '.spectrum' + format)
+                    self[item].plot(fname=fname,
+                                    backend=backend, range=range, ylim=ylim, title_text=ttl, plot_model=plot_model,
+                                    shade_reg=shade_reg)
         print('Done.')
 
     def plot_hist(self, fname_base, plot_log=False, backend='plotly'):
@@ -1936,9 +2069,9 @@ class Stack(Spectra):
             fig.write_html(fname, include_mathjax="cdn")
             fig.write_image(fname.replace('.html', '.pdf'))
 
-    def line_flux_report(self, fluxr_dict, line=6374, dw=10, norm_dw=100, ratio_target=1, plot_backend='plotly', path='',
+    def line_flux_report(self, fluxr_dict, line=6374, dw=10, norm_dw=(30, 30), ratio_target=4, plot_backend='plotly', path='',
                               agn_diagnostics=False, ylim=None, title_text_conf=None, title_text_snr=None,
-                              conf_dict=None, conf_target=None, plot_spec='none'):
+                              conf_dict=None, conf_target=None, inspect=None, plot_spec='none'):
         """
         Plotting diagnostics for line flux ratio tests.
 
@@ -1968,17 +2101,33 @@ class Stack(Spectra):
         :param conf_target: optional, float
             Required if conf_dict is provided and plot_spec is 'sorted'.  The target confidence level above which
             something is considered a true positive.
+        :param inspect: str
+            Key for a value in the data dictionary that has an additional property to be plotted on the color axis of
+            the confidence covariance plots.
         :param plot_spec: str
             'none', 'all', 'detections', or 'sorted' to plot none, all, only those individual spectra that satisfy the
             detection criterium, or all in sorted sub-folders
         :return ss: list of np.ndarray
             The names of all the spectra that passed the detection criterium for each bin.
         """
-        self._line_flux_diagnostics(fluxr_dict, line, dw, plot_backend, conf_dict=conf_dict, path=path)
+        self._line_flux_diagnostics(fluxr_dict, line, dw, plot_backend=plot_backend, title_text_snr=title_text_snr, conf_dict=conf_dict,
+                                    inspect=inspect, path=path)
         ss = []
         for i in range(len(fluxr_dict)):
-            ratios = np.array([fluxr_dict[i][key][0] for key in fluxr_dict[i] if key != 'stack'])
-            specnames = np.array([key for key in fluxr_dict[i] if key != 'stack'], dtype=object)
+            ratios = np.array([fluxr_dict[i][key] for key in fluxr_dict[i]])
+            specnames = np.array([key for key in fluxr_dict[i]], dtype=object)
+
+            good = [np.where((self[s].wave > line - dw) & (self[s].wave < line + dw))[0] for s in specnames]
+            amps = np.zeros(specnames.size)
+            amps_dict = {}
+            for j, s in enumerate(specnames):
+                if good[j].size > 1:
+                    f = np.nanmax(self[s].flux[good[j]]) - 1
+                    amps[j] = f
+                    amps_dict[s] = f
+                else:
+                    amps_dict[s] = 0.
+
             if title_text_conf:
                 confidences = np.array([self[sn].data[title_text_conf] for sn in specnames])
             # ind = ratios.argsort()[-5:][::-1]
@@ -1987,7 +2136,7 @@ class Stack(Spectra):
             print(specnames[w])
             if agn_diagnostics:
                 kew = np.array([self[i].data['agn_class'] for i in specnames])
-                kw = np.where((kew == False) & (ratios >= 1))[0]
+                kw = np.where((kew == False) & (ratios >= ratio_target))[0]
                 print(f'Of these, {len(kw)} did NOT satisfy the Kewley et al. 2001 criteria: ')
                 print(specnames[kw])
             ss.append(specnames[w])
@@ -1995,7 +2144,7 @@ class Stack(Spectra):
                 snrs = np.array([self[si].data[title_text_snr] for si in specnames])
             tt = {s: '$\mathcal{F}=%.3f$' % r for s, r in zip(specnames, ratios)} if not title_text_conf else \
                 {s: '$\mathcal{F}=%.3f$; $conf=%.3f$' % (r, c) for s, r, c in zip(specnames, ratios, confidences)} if not title_text_snr else \
-                {s: '$\mathcal{F}=%.3f$; $conf=%.3f$; $SNR=%.3f$' % (r, c, snr) for s, r, c, snr in zip(specnames, ratios, confidences, snrs)}
+                {s: '$\mathcal{F}=%.3f$; $conf=%.3f$; $SNR=%.3f$, $A*SNR=%.3f$' % (r, c, snr, a*snr) for s, r, c, snr, a in zip(specnames, ratios, confidences, snrs, amps)}
             if title_text_conf:
                 tp = np.where((ratios >= ratio_target) & (confidences >= conf_target))[0]
                 fp = np.where((ratios >= ratio_target) & (confidences < conf_target))[0]
@@ -2009,11 +2158,15 @@ class Stack(Spectra):
                 fpsnr = np.nanmedian([self[ispec].data[title_text_snr] for ispec in specnames[fp]])
                 tnsnr = np.nanmedian([self[ispec].data[title_text_snr] for ispec in specnames[tn]])
                 fnsnr = np.nanmedian([self[ispec].data[title_text_snr] for ispec in specnames[fn]])
+                tpasnr = np.nanmedian([self[ispec].data[title_text_snr]*amps_dict[ispec] for ispec in specnames[tp]])
+                fpasnr = np.nanmedian([self[ispec].data[title_text_snr] * amps_dict[ispec] for ispec in specnames[fp]])
+                tnasnr = np.nanmedian([self[ispec].data[title_text_snr] * amps_dict[ispec] for ispec in specnames[tn]])
+                fnasnr = np.nanmedian([self[ispec].data[title_text_snr] * amps_dict[ispec] for ispec in specnames[fn]])
                 with open(os.path.join(path, 'report_'+utils.gen_datestr(True)+'.txt'), 'w') as file:
-                    file.write('tp: ' + str(ntp) + ', med SNR: ' + str(tpsnr) + '\n')
-                    file.write('fp: ' + str(nfp) + ', med SNR: ' + str(fpsnr) + '\n')
-                    file.write('tn: ' + str(ntn) + ', med SNR: ' + str(tnsnr) + '\n')
-                    file.write('fn: ' + str(nfn) + ', med SNR: ' + str(fnsnr) + '\n')
+                    file.write('tp: ' + str(ntp) + ', med SNR: ' + str(tpsnr) + ', med A*SNR: ' + str(tpasnr) + '\n')
+                    file.write('fp: ' + str(nfp) + ', med SNR: ' + str(fpsnr) + ', med A*SNR: ' + str(fpasnr) + '\n')
+                    file.write('tn: ' + str(ntn) + ', med SNR: ' + str(tnsnr) + ', med A*SNR: ' + str(tnasnr) + '\n')
+                    file.write('fn: ' + str(nfn) + ', med SNR: ' + str(fnsnr) + ', med A*SNR: ' + str(fnasnr) + '\n')
             else:
                 with open(os.path.join(path, 'report_'+utils.gen_datestr(True)+'.txt'), 'w') as file:
                     file.write('number integrated: ' + str(len(specnames)) + '\n')
@@ -2026,31 +2179,51 @@ class Stack(Spectra):
                     tn = np.where((ratios < ratio_target) & (confidences < conf_target))[0]
                     fn = np.where((ratios < ratio_target) & (confidences >= conf_target))[0]
                     name_list = [specnames[tp], specnames[fp], specnames[tn], specnames[fn]]
-                    path_list = ['true_positives', 'false_positives', 'true_negatives', 'false_negatives']
+                    ratio_list = [ratios[tp], ratios[fp], ratios[tn], ratios[fn]]
+                    path_list = ['true_positives_'+str(line), 'false_positives+'+str(line), 'true_negatives_'+str(line), 'false_negatives_'+str(line)]
                 elif plot_spec == 'all':
                     name_list = [specnames]
-                    path_list = ['spectra']
+                    ratio_list = [ratios]
+                    path_list = ['spectra_'+str(line)]
                 elif plot_spec == 'detections':
                     name_list = [specnames[w]]
-                    path_list = ['detections']
+                    ratio_list = [ratios[w]]
+                    path_list = ['detections_'+str(line)]
                 else:
                     raise ValueError('invalid plot_spec option')
-                for names, pathi in zip(name_list, path_list):
-                    self.plot_spectra(os.path.join(path, pathi), names, range=(line-norm_dw, line+norm_dw), ylim=ylim, backend='pyplot',
-                                      title_text=tt)
+                for names, rts, pathi in zip(name_list, ratio_list, path_list):
+                    shade = [(line-dw, line+dw), (line-norm_dw[0]-dw, line-norm_dw[0]+dw), (line+norm_dw[1]-dw, line+norm_dw[1]+dw)]
+                    self.plot_spectra(os.path.join(path, pathi), names, range=(line-100, line+100), ylim=ylim, backend='pyplot',
+                                      title_text=tt, f=rts, shade_reg=shade)
         return ss
 
-    def _line_flux_diagnostics(self, fluxr_dict, line=6374, dw=10, plot_backend='pyplot', conf_dict=None, path=''):
+    def _line_flux_diagnostics(self, fluxr_dict, line=6374, dw=5, title_text_snr=None, plot_backend='pyplot', conf_dict=None,
+                               inspect=None, path=''):
         # 10^-17 erg s^-1 cm^-2 (not per angstrom after integration)
         # Get data
         lengths = [len(fluxr_dict[fi]) for fi in fluxr_dict]
         ratios = []
         specnames = []
         stack_fluxes = []
+        amps = []
+        snrs = []
+        inspections = []
         for i in range(len(fluxr_dict)):
-            ratios.append(np.array([fluxr_dict[i][fi][0] for fi in fluxr_dict[i] if fi != 'stack']))
-            specnames.append(np.array([fi for fi in fluxr_dict[i] if fi != 'stack']))
-            stack_fluxes.append(fluxr_dict[i]['stack'][0])
+            ratios.append(np.array([fluxr_dict[i][fi] for fi in fluxr_dict[i]]))
+            specnames.append(np.array([fi for fi in fluxr_dict[i]]))
+
+            good = [np.where((self[s].wave > line-dw) & (self[s].wave < line+dw))[0] for s in specnames[i]]
+            ampi_temp = np.zeros(specnames[i].size)
+            for j, s in enumerate(specnames[i]):
+                if good[j].size > 1:
+                    ampi_temp[j] = np.nanmax(self[s].flux[good[j]])-1
+            amps.append(ampi_temp)
+
+            if inspect:
+                inspections.append(np.array([self[si].data[inspect] for si in specnames[i]]))
+            if title_text_snr:
+                snrs.append(np.array([self[si].data[title_text_snr] for si in specnames[i]]))
+            # stack_fluxes.append(fluxr_dict[i]['stack'][0])
 
         # Get mins/maxes
         # lstr = len(list(fluxr_dict[0].keys())[0])
@@ -2080,7 +2253,7 @@ class Stack(Spectra):
                 ratioplot.set_yscale('log')
                 ratioplot.set_xlabel('Line flux / Stacked line flux')
                 ratioplot.set_ylabel('Number in bin')
-                ratioplot.set_title('Stacked line flux $= %.3f' % stack_fluxes[k])
+                # ratioplot.set_title('Stacked line flux $= %.3f' % stack_fluxes[k])
                 # ratioplot.set_ylim(0, 3)
 
                 small = []
@@ -2120,28 +2293,28 @@ class Stack(Spectra):
                     big.append(big1)
 
                 # Stack line profile
-                stack = fig.add_subplot(gs[2, 2])
-                good = np.where((reg[0] < self.universal_grid[k]) & (self.universal_grid[k] < reg[1]))[0]
-                stack.plot(self.universal_grid[k][good], self.stacked_flux[k][good], 'k-')
-                stack.fill_between(self.universal_grid[k][good],
-                                   self.stacked_flux[k][good]-self.stacked_err[k][good],
-                                   self.stacked_flux[k][good]+self.stacked_err[k][good],
-                                   color='mediumaquamarine', alpha=0.5)
-                stack.axvline(line, linestyle='--', color='k')
-                stack.axvspan(line-dw, line+dw, color='slategrey', alpha=0.5)
-                stack.set_xticks([line-dw, line+dw])
+                # stack = fig.add_subplot(gs[2, 2])
+                # good = np.where((reg[0] < self.universal_grid[k]) & (self.universal_grid[k] < reg[1]))[0]
+                # stack.plot(self.universal_grid[k][good], self.stacked_flux[k][good], 'k-')
+                # stack.fill_between(self.universal_grid[k][good],
+                #                    self.stacked_flux[k][good]-self.stacked_err[k][good],
+                #                    self.stacked_flux[k][good]+self.stacked_err[k][good],
+                #                    color='mediumaquamarine', alpha=0.5)
+                # stack.axvline(line, linestyle='--', color='k')
+                # stack.axvspan(line-dw, line+dw, color='slategrey', alpha=0.5)
+                # stack.set_xticks([line-dw, line+dw])
 
                 # Axis sharing
                 big[0].sharex(big[1])
-                stack.sharex(big[0])
-                small[0].sharex(stack)
+                # stack.sharex(big[0])
+                small[0].sharex(big[0])
                 small[1].sharex(small[0])
                 big[0].sharey(big[1])
-                stack.sharey(big[0])
-                small[0].sharey(stack)
+                # stack.sharey(big[0])
+                small[0].sharey(big[0])
                 small[1].sharey(small[0])
 
-                stack.set_title('Stack')
+                # stack.set_title('Stack')
                 fig.savefig(path+os.sep+'line_flux_ratios_'+str(k)+'.pdf', dpi=300)
                 plt.close()
 
@@ -2155,17 +2328,23 @@ class Stack(Spectra):
                     isort = np.argsort(confidences[k])
                     confidences[k] = confidences[k][isort]
                     ratios[k] = ratios[k][isort]
+                    amps[k] = amps[k][isort]
+                    snrs[k] = snrs[k][isort]
+                    asnr = amps[k] * snrs[k]
+                    if inspect:
+                        inspections[k] = inspections[k][isort]
 
                     std = np.nanstd(ratios[k])
                     median = np.nanmedian(ratios[k])
                     good = np.where((np.abs(ratios[k] - median) < 3*std) & (np.isfinite(confidences[k]) & np.isfinite(ratios[k])))[0]
                     ratios[k] = ratios[k][good]
                     confidences[k] = confidences[k][good]
+                    asnr = asnr[good]
 
-                    ntop = int(.2*len(ratios[k]))
-                    rsort = np.argsort(ratios[k])
-                    top20 = ratios[k][rsort][len(ratios[k])-ntop:]
-                    top20c = confidences[k][rsort][len(ratios[k])-ntop:]
+                    # ntop = int(.2*len(ratios[k]))
+                    # rsort = np.argsort(ratios[k])
+                    # top20 = ratios[k][rsort][len(ratios[k])-ntop:]
+                    # top20c = confidences[k][rsort][len(ratios[k])-ntop:]
 
                     A = np.vstack((confidences[k], np.ones_like(confidences[k]))).T
                     m, c = np.linalg.lstsq(A, ratios[k], rcond=None)[0]
@@ -2173,8 +2352,9 @@ class Stack(Spectra):
                     y_model = m*x_model + c
 
                     fig, ax = plt.subplots()
-                    ax.plot(confidences[k], ratios[k], '.', color='rebeccapurple')
-                    ax.plot(top20c, top20, '.', color='cyan', label='Top 20%')
+                    dataplot = ax.plot(confidences[k], ratios[k], '.', color=asnr if not inspect else inspections[k], cmap='winter')
+                    fig.colorbar(dataplot, ax=ax, label='$A*SNR$' if not inspect else 'Inspections')
+                    # ax.plot(top20c, top20, '.', color='cyan', label='Top 20%')
                     ax.plot(x_model, y_model, 'k--')
                     ax.legend()
                     ax.set_title('Linear Least Squares Fit: $m=%.3f$, $b=%.3f$' % (m, c))
@@ -2194,7 +2374,7 @@ class Stack(Spectra):
                                                     specs=[[{"rowspan": 2, "colspan": 2}, None, {}],
                                                            [None, None, {}],
                                                            [{}, {}, {}]],
-                                                    subplot_titles=['Stacked line flux = %.3f' % stack_fluxes[k],
+                                                    subplot_titles=['',
                                                                     ttl1, ttl2, ttl3, ttl4, 'Stack'])
                 fig.add_trace(plotly.graph_objects.Histogram(x=ratios[k], xbins=dict(start=0, end=3, size=0.2)), row=1, col=1)
                 fig.update_traces(marker_color='rgb(158,202,225)', marker_line_color='rgb(8,48,107)',
@@ -2261,25 +2441,25 @@ class Stack(Spectra):
                     if miniy < miny:
                         miny = miniy
 
-                good = np.where((reg[0] < self.universal_grid[k]) & (self.universal_grid[k] < reg[1]))[0]
-                fig.add_trace(plotly.graph_objects.Scatter(x=self.universal_grid[k][good], y=self.stacked_flux[k][good],
-                                                           line=dict(color='black', width=linewidth),
-                                                           name='Data', showlegend=False), row=3, col=3)
-                fig.add_trace(plotly.graph_objects.Scatter(x=self.universal_grid[k][good],
-                                                           y=self.stacked_flux[k][good] + self.stacked_err[k][good],
-                                                           line=dict(color='#60dbbd', width=0),
-                                                           fillcolor='rgba(96, 219, 189, 0.6)',
-                                                           name='Upper Bound', showlegend=False), row=3, col=3)
-                fig.add_trace(plotly.graph_objects.Scatter(x=self.universal_grid[k][good],
-                                                           y=self.stacked_flux[k][good] - self.stacked_err[k][good],
-                                                           line=dict(color='#60dbbd', width=0),
-                                                           fillcolor='rgba(96, 219, 189, 0.6)',
-                                                           fill='tonexty', name='Lower Bound', showlegend=False), row=3, col=3)
-                fig.add_vline(x=line, line_width=2 * linewidth, line_dash='dot', line_color='#226666', row=3, col=3)
+                # good = np.where((reg[0] < self.universal_grid[k]) & (self.universal_grid[k] < reg[1]))[0]
+                # fig.add_trace(plotly.graph_objects.Scatter(x=self.universal_grid[k][good], y=self.stacked_flux[k][good],
+                #                                            line=dict(color='black', width=linewidth),
+                #                                            name='Data', showlegend=False), row=3, col=3)
+                # fig.add_trace(plotly.graph_objects.Scatter(x=self.universal_grid[k][good],
+                #                                            y=self.stacked_flux[k][good] + self.stacked_err[k][good],
+                #                                            line=dict(color='#60dbbd', width=0),
+                #                                            fillcolor='rgba(96, 219, 189, 0.6)',
+                #                                            name='Upper Bound', showlegend=False), row=3, col=3)
+                # fig.add_trace(plotly.graph_objects.Scatter(x=self.universal_grid[k][good],
+                #                                            y=self.stacked_flux[k][good] - self.stacked_err[k][good],
+                #                                            line=dict(color='#60dbbd', width=0),
+                #                                            fillcolor='rgba(96, 219, 189, 0.6)',
+                #                                            fill='tonexty', name='Lower Bound', showlegend=False), row=3, col=3)
+                # fig.add_vline(x=line, line_width=2 * linewidth, line_dash='dot', line_color='#226666', row=3, col=3)
                 # fig['layout']['text'+str(6)] = 'Stack'
                 fig['layout']['xaxis'+str(6)]['tickmode'] = 'array'
                 fig['layout']['xaxis'+str(6)]['tickvals'] = [line - dw, line + dw]
-                for i in range(2, 7):
+                for i in range(2, 6):
                     fig['layout']['yaxis'+str(i)]['range'] = (miny, maxy)
                     fig['layout']['yaxis'+str(i)]['constrain'] = 'domain'
                     fig['layout']['xaxis'+str(i)]['range'] = (line-2*dw, line+2*dw)
@@ -2311,6 +2491,11 @@ class Stack(Spectra):
                     isort = np.argsort(confidences[k])
                     confidences[k] = confidences[k][isort]
                     ratios[k] = ratios[k][isort]
+                    amps[k] = amps[k][isort]
+                    snrs[k] = snrs[k][isort]
+                    asnr = amps[k] * snrs[k]
+                    if inspect:
+                        inspections[k] = inspections[k][isort]
 
                     std = np.nanstd(ratios[k])
                     median = np.nanmedian(ratios[k])
@@ -2318,11 +2503,12 @@ class Stack(Spectra):
                                 np.isfinite(confidences[k]) & np.isfinite(ratios[k])))[0]
                     ratios[k] = ratios[k][good]
                     confidences[k] = confidences[k][good]
+                    asnr = asnr[good]
 
-                    ntop = int(.2 * len(ratios[k]))
-                    rsort = np.argsort(ratios[k])
-                    top20 = ratios[k][rsort][len(ratios[k]) - ntop:]
-                    top20c = confidences[k][rsort][len(ratios[k]) - ntop:]
+                    # ntop = int(.2 * len(ratios[k]))
+                    # rsort = np.argsort(ratios[k])
+                    # top20 = ratios[k][rsort][len(ratios[k]) - ntop:]
+                    # top20c = confidences[k][rsort][len(ratios[k]) - ntop:]
 
                     A = np.vstack((confidences[k], np.ones_like(confidences[k]))).T
                     m, c = np.linalg.lstsq(A, ratios[k], rcond=None)[0]
@@ -2331,9 +2517,11 @@ class Stack(Spectra):
 
                     fig = plotly.subplots.make_subplots(rows=1, cols=1)
                     fig.add_trace(plotly.graph_objects.Scatter(x=confidences[k], y=ratios[k], mode='markers',
-                        marker=dict(size=4, color='#663399'), showlegend=False))
-                    fig.add_trace(plotly.graph_objects.Scatter(x=top20c, y=top20, mode='markers',
-                        marker=dict(size=4, color='#48CADB'), showlegend=False))
+                        marker=dict(size=4, color=asnr if not inspect else inspections[k],
+                                    colorbar=dict(title="$A \\times SNR$" if not inspect else "Inspections"),
+                                    colorscale="ice" if not inspect else "spectral", cmin=0 if not inspect else -1, cmax=4 if not inspect else 1), showlegend=False))
+                    # fig.add_trace(plotly.graph_objects.Scatter(x=top20c, y=top20, mode='markers',
+                    #     marker=dict(size=4, color='#48CADB'), showlegend=False))
                     fig.add_trace(plotly.graph_objects.Scatter(x=x_model, y=y_model, line=dict(color='black', width=.5, dash='dash'),
                                                                showlegend=False))
                     fig.update_layout(
