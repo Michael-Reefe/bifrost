@@ -428,7 +428,11 @@ class Spectrum:
             specobj = hdu[2].data
             z = specobj['z'][0]
             if name is None:
-                name = specobj['SPECOBJID'][0].strip()
+                name = specobj['SPECOBJID'][0]
+                if type(name) is str:
+                    name = name.strip()
+                else:
+                    name = str(name)
             try:
                 ra = hdu[0].header['RA']
                 dec = hdu[0].header['DEC']
@@ -1576,7 +1580,7 @@ class Stack(Spectra):
         return stacked_flux, stacked_err
 
     @utils.timer(name='Line Flux Integration')
-    def calc_line_flux_ratios(self, line, dw=5, norm_dw=100, save=False, conf=None, path=''):
+    def calc_line_flux_ratios(self, line, dw=5, tag='', save=False, conf=None, path=''):
         """
         Calculate the integrated flux ratios of each spectra compared to the stacked spectrum.
 
@@ -1694,7 +1698,7 @@ class Stack(Spectra):
 
         if save:
             serialized = json.dumps(out, indent=4)
-            with open(path + os.sep + 'line_flux_ratios_'+utils.gen_datestr(True)+'.json', 'w') as handle:
+            with open(path + os.sep + 'line_flux_ratios_'+str(line)+'_'+tag+'.json', 'w') as handle:
                 handle.write(serialized)
         if conf:
             return _wl, _wr, out, confs
@@ -1895,8 +1899,7 @@ class Stack(Spectra):
                         if good.size < 10:
                             continue
                     if f is not None:
-                        fname = os.path.join(fname_root,
-                                             f'{f[i]:.3f}_' + self[item].name.replace(' ', '_') + '.spectrum' + format)
+                        fname = os.path.join(fname_root, self[item].name.replace(' ', '_') + '.spectrum' + format)
                     else:
                         fname = os.path.join(fname_root, self[item].name.replace(' ', '_') + '.spectrum' + format)
                     self[item].plot(fname=fname,
@@ -2069,8 +2072,8 @@ class Stack(Spectra):
             fig.write_html(fname, include_mathjax="cdn")
             fig.write_image(fname.replace('.html', '.pdf'))
 
-    def line_flux_report(self, fluxr_dict, line=6374, dw=10, norm_dw=(30, 30), ratio_target=4, plot_backend='plotly', path='',
-                              agn_diagnostics=False, ylim=None, title_text_conf=None, title_text_snr=None,
+    def line_flux_report(self, fluxr_dict, line=6374, dw=10, norm_dw=(30, 30), plot_range=None, ratio_target=4, plot_backend='plotly', path='',
+                              agn_diagnostics=False, ylim=None, title_text_conf=None, title_text_snr=None, tag='',
                               conf_dict=None, conf_target=None, inspect=None, plot_spec='none'):
         """
         Plotting diagnostics for line flux ratio tests.
@@ -2162,25 +2165,31 @@ class Stack(Spectra):
                 fpasnr = np.nanmedian([self[ispec].data[title_text_snr] * amps_dict[ispec] for ispec in specnames[fp]])
                 tnasnr = np.nanmedian([self[ispec].data[title_text_snr] * amps_dict[ispec] for ispec in specnames[tn]])
                 fnasnr = np.nanmedian([self[ispec].data[title_text_snr] * amps_dict[ispec] for ispec in specnames[fn]])
-                with open(os.path.join(path, 'report_'+utils.gen_datestr(True)+'.txt'), 'w') as file:
+                with open(os.path.join(path, 'report_'+str(line)+'_'+tag+'.txt'), 'w') as file:
                     file.write('tp: ' + str(ntp) + ', med SNR: ' + str(tpsnr) + ', med A*SNR: ' + str(tpasnr) + '\n')
                     file.write('fp: ' + str(nfp) + ', med SNR: ' + str(fpsnr) + ', med A*SNR: ' + str(fpasnr) + '\n')
                     file.write('tn: ' + str(ntn) + ', med SNR: ' + str(tnsnr) + ', med A*SNR: ' + str(tnasnr) + '\n')
                     file.write('fn: ' + str(nfn) + ', med SNR: ' + str(fnsnr) + ', med A*SNR: ' + str(fnasnr) + '\n')
             else:
-                with open(os.path.join(path, 'report_'+utils.gen_datestr(True)+'.txt'), 'w') as file:
+                with open(os.path.join(path, 'report_'+str(line)+'_'+tag+'.txt'), 'w') as file:
                     file.write('number integrated: ' + str(len(specnames)) + '\n')
                     file.write('detections: ' + str(len(specnames[w])) + '\n')
                     file.write('non-detections: ' + str(len(specnames)-len(specnames[w])) + '\n')
             if plot_spec != 'none':
                 if plot_spec == 'sorted':
-                    tp = np.where((ratios >= ratio_target) & (confidences >= conf_target))[0]
-                    fp = np.where((ratios >= ratio_target) & (confidences < conf_target))[0]
-                    tn = np.where((ratios < ratio_target) & (confidences < conf_target))[0]
-                    fn = np.where((ratios < ratio_target) & (confidences >= conf_target))[0]
-                    name_list = [specnames[tp], specnames[fp], specnames[tn], specnames[fn]]
-                    ratio_list = [ratios[tp], ratios[fp], ratios[tn], ratios[fn]]
-                    path_list = ['true_positives_'+str(line), 'false_positives+'+str(line), 'true_negatives_'+str(line), 'false_negatives_'+str(line)]
+                    if conf_dict is not None:
+                        tp = np.where((ratios >= ratio_target) & (confidences >= conf_target))[0]
+                        fp = np.where((ratios >= ratio_target) & (confidences < conf_target))[0]
+                        tn = np.where((ratios < ratio_target) & (confidences < conf_target))[0]
+                        fn = np.where((ratios < ratio_target) & (confidences >= conf_target))[0]
+                        name_list = [specnames[tp], specnames[fp], specnames[tn], specnames[fn]]
+                        ratio_list = [ratios[tp], ratios[fp], ratios[tn], ratios[fn]]
+                        path_list = ['true_positives_'+str(line), 'false_positives+'+str(line), 'true_negatives_'+str(line), 'false_negatives_'+str(line)]
+                    else:
+                        nw = np.where(ratios < ratio_target)[0]
+                        name_list = [specnames[w], specnames[nw]]
+                        ratio_list = [ratios[w], ratios[nw]]
+                        path_list = ['detections', 'non-detections']
                 elif plot_spec == 'all':
                     name_list = [specnames]
                     ratio_list = [ratios]
@@ -2193,8 +2202,8 @@ class Stack(Spectra):
                     raise ValueError('invalid plot_spec option')
                 for names, rts, pathi in zip(name_list, ratio_list, path_list):
                     shade = [(line-dw, line+dw), (line-norm_dw[0]-dw, line-norm_dw[0]+dw), (line+norm_dw[1]-dw, line+norm_dw[1]+dw)]
-                    self.plot_spectra(os.path.join(path, pathi), names, range=(line-100, line+100), ylim=ylim, backend='pyplot',
-                                      title_text=tt, f=rts, shade_reg=shade)
+                    self.plot_spectra(os.path.join(path, pathi), names, range=plot_range, ylim=ylim, backend=plot_backend,
+                                      title_text=tt, f=None, shade_reg=shade)
         return ss
 
     def _line_flux_diagnostics(self, fluxr_dict, line=6374, dw=5, title_text_snr=None, plot_backend='pyplot', conf_dict=None,
