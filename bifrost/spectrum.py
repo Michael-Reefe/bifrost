@@ -838,7 +838,7 @@ class Spectra(dict):
 
     def __getitem__(self, key):
         t = type(key)
-        if t is str or t is t is np.str_:
+        if t is str or t is np.str_:
             return super().__getitem__(key)
         elif t is int:
             return self[list(self.keys())[key]]
