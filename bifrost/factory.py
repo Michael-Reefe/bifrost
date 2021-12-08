@@ -13,8 +13,9 @@ from bifrost import spectrum, utils, filters
 
 @utils.timer(name='Quick FITS Load')
 def quick_fits_stack(data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=False, plot_backend='plotly',
-         plot_spec=None, limits=None, _filters=None, name_by='id', properties_tbl=None, properties_comment='#',
-         properties_sep=',', properties_name_col=0, progress_bar=True, stack_name='stacked_data'):
+                     plot_spec=None, limits=None, _filters=None, name_by='id', properties_tbl=None,
+                     properties_comment='#', properties_sep=',', properties_name_col=0, progress_bar=True,
+                     stack_name='stacked_data'):
     """
     A convenience function for quickly creating a stack object from FITS files.
 
@@ -41,12 +42,13 @@ def quick_fits_stack(data_path, out_path=None, n_jobs=-1, save_pickle=True, save
         "folder" or "file" : how to specify object keys, based on the name of the fits file or the folder that the fits
         file is in.
     :param properties_tbl: str, iterable
-        A path (or paths) to a table file (.csv, .tbl, .xlsx, .txt, ...) containing properties of the spectra that are being loaded
-        in separately.  The file MUST be in the correct format:
+        A path (or paths) to a table file (.csv, .tbl, .xlsx, .txt, ...) containing properties of the spectra that are
+        being loaded in separately.  The file MUST be in the correct format:
             - The header must be the first uncommented row in the file
             - Comments should be marked with properties_comment (Default: "#")
             - Should be delimited by properties_sep (Default: ",")
-            - The properties_name_col (Default: 0)th column should be the object name, which should match the object name(s) read in from fits files/folders.
+            - The properties_name_col (Default: 0)th column should be the object name, which should match the object
+              name(s) read in from fits files/folders.
             - All other columns should list properties that the user wants to be appended to Spectrum objects.
     :param properties_sep: str
         Delimiter for the properties_tbl file.  Default: ","
@@ -56,6 +58,8 @@ def quick_fits_stack(data_path, out_path=None, n_jobs=-1, save_pickle=True, save
         Index of the column that speicifies object name in the properties_tbl file.  Default: 0.
     :param progress_bar: bool
         If True, shows a progress bar for reading in files.  Default is False.
+    :param stack_name: str
+        The name of the stack, for file saving purposes.
     :return stack: Stack
         The Stack object.
     """
@@ -83,6 +87,7 @@ def quick_fits_stack(data_path, out_path=None, n_jobs=-1, save_pickle=True, save
     stack = spectrum.Stack(filters=filter_list, progress_bar=progress_bar)
 
     assert name_by in ('file', 'folder', 'id'), "name_by must be one of ['file', 'folder', 'id']"
+
     def make_spec(filepath):
         name = None
         if name_by == 'id':
@@ -138,10 +143,10 @@ def quick_fits_stack(data_path, out_path=None, n_jobs=-1, save_pickle=True, save
 
 @utils.timer(name='Quick Sim Load')
 def quick_sim_stack(line, size=10_000, wave_range=(-20, 20), rv='random', rv_lim=(-100, 100), vsini='random',
-               vsini_lim=(0, 500), noise_std='random', noise_std_lim=(0.1, 1),
-               amplitudes=None, widths=None,
-               out_path=None, n_jobs=-1, save_pickle=True, save_json=False, plot_backend='plotly',
-               plot_spec=None, _filters=None, seeds=None, progress_bar=False):
+                    vsini_lim=(0, 500), noise_std='random', noise_std_lim=(0.1, 1),
+                    amplitudes=None, widths=None,
+                    out_path=None, n_jobs=-1, save_pickle=True, save_json=False, plot_backend='plotly',
+                    plot_spec=None, _filters=None, seeds=None, progress_bar=False):
     """
     The main driver for the stacking code.
 
@@ -151,12 +156,25 @@ def quick_sim_stack(line, size=10_000, wave_range=(-20, 20), rv='random', rv_lim
         The number of randomized simulated spectra to generate and stack.
     :param wave_range: tuple
         Range of wavelengths around the line to generate spectra over.
+    :param rv: str, float
+        Radial velocity of simulated spectra.  'random' to make each one random.
     :param rv_lim: tuple
         Limits on randomized radial velocities of spectra, in km/s.
+    :param vsini: str, float
+        Rotational velocity of simulated spectra. 'random' to make each one random.
     :param vsini_lim: tuple
         Limits on randomized rotational velocities of spectra, in km/s.
-    :param snr_lim: tuple
-        Limits on randomized SNRs of spectra.
+    :param noise_std: str, float
+        The standard deviation of the noise to be injected in the simulated spectra.  'random' to make each one random.
+    :param noise_std_lim: tuple
+        Limits on randomized noise standard deviations of spectra.
+    :param amplitudes: iterable
+        A list of amplitudes for each simulated spectra.  Must match the length of widths and seeds.  Default is 1.
+    :param widths: iterable
+        A list of widths for each simiulated spectra.  Must match the length of amplitudes and seeds.  Default is 0.1.
+    :param seeds: iterable
+        A list of seeds to use in generating random noise for each spectrum.  Must match the length of amplitudes and
+        widths.  Default is None (random).
     :param out_path: str
         The output path to save output plots and pickles/jsons to.  Default is "data.stacked.YYYYMMDD_HHMMSS"
     :param n_jobs: int
@@ -196,14 +214,14 @@ def quick_sim_stack(line, size=10_000, wave_range=(-20, 20), rv='random', rv_lim
 
     def make_spec(A, sigma, seed):
         ispec = spectrum.Spectrum.simulated(line, wave_range, rv, rv_lim, vsini, vsini_lim, noise_std, noise_std_lim,
-                                            A=A, sigma=sigma, seed=seed)
+                                            a=A, sigma=sigma, seed=seed)
         return ispec
 
     print('Generating spectra...')
     if amplitudes is None:
-        amplitudes = np.array([1] * size)
+        amplitudes = np.ones(size)
     if widths is None:
-        widths = np.array([0.1] * size)
+        widths = np.ones(size) * 0.1
     if seeds is None:
         seeds = [None] * size
     range_ = tqdm.tqdm(zip(amplitudes, widths, seeds)) if progress_bar else zip(amplitudes, widths, seeds)

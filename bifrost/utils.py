@@ -89,6 +89,7 @@ def coord_name(ra, dec):
     dec = sexagesimal(dec, 1).replace(':', '')
     return 'RA: '+ra+', Dec: '+sign+dec
 
+
 # Make a wrapper to time each call of a function
 def timer(name=None):
 

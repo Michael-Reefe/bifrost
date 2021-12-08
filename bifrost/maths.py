@@ -81,8 +81,6 @@ def calc_redshift_sqrt(vel):
     """
     Calculate the redshift from the velocity.
 
-    :param wave: np.ndarray
-        The wavelength array
     :param vel: float
         The velocity of the object in km/s.
     :return wave: np.ndarray
@@ -166,8 +164,8 @@ def correct_extinction(wave, flux, ebv, r_v):
     # Infrared
 
     good = np.where((x > 0.3) & (x < 1.1))[0]
-    a[good] = 0.574 * x[good] ** (1.61)
-    b[good] = -0.527 * x[good] ** (1.61)
+    a[good] = 0.574 * x[good] ** 1.61
+    b[good] = -0.527 * x[good] ** 1.61
 
     ###############################
     # Optical & Near IR

@@ -49,7 +49,7 @@ class Filter:
                 try:
                     ub = float(elements[1])
                     at = elements[0]
-                except:
+                except ValueError:
                     lb = float(elements[0])
                     at = elements[1]
         elif '>' in string:
@@ -63,7 +63,7 @@ class Filter:
                 try:
                     lb = float(elements[1])
                     at = elements[0]
-                except:
+                except ValueError:
                     ub = float(elements[0])
                     at = elements[1]
         at = at.strip()
