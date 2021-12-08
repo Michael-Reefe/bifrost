@@ -838,7 +838,7 @@ class Spectra(dict):
 
     def __getitem__(self, key):
         t = type(key)
-        if t is str or t is np.str or t is np.str_:
+        if t is str or t is t is np.str_:
             return super().__getitem__(key)
         elif t is int:
             return self[list(self.keys())[key]]
@@ -1504,12 +1504,12 @@ class Stack(Spectra):
         """
         print('Calculating a universal wave grid...')
         all_names = binned_spec if binned_spec is not None else np.array([s for s in self], dtype=np.str)
-        binned_indices = np.array([self.get_spec_index(name) for name in all_names], dtype=np.int)
+        binned_indices = np.array([self.get_spec_index(name) for name in all_names], dtype=int)
         wave = self.to_numpy('wave')['wave'][binned_indices]
         if self.wave_criterion == 'strict':
             wmin = None
             wmax = None
-            removed_names = np.array([], dtype=np.int)
+            removed_names = np.array([], dtype=int)
             for i, wi in enumerate(wave):
                 remove = False
                 if self.norm_region:

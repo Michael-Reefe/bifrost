@@ -81,3 +81,4 @@ stack()
 
 ## Examples
 See the example files in the examples folder to get a sense of how to use the code.
+Feel free to also run the unit tests located in `unit_test.py`.
