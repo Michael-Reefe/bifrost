@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import plotly.subplots
 import plotly.graph_objects
+from joblib import Parallel, delayed
 
 import scipy.optimize
 import scipy.integrate
@@ -967,6 +968,230 @@ class Stack(Spectra):
         self.bin_log = False
         self.agn_ref_pt = None
         super().__init__()
+
+    @classmethod
+    @utils.timer(name='Quick FITS Load')
+    def quick_fits_stack(cls, data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=False,
+                         limits=None, _filters=None, name_by='id', properties_tbl=None,
+                         properties_comment='#', properties_sep=',', properties_name_col=0, progress_bar=True,
+                         stack_name='stacked_data'):
+        """
+        A convenience function for quickly creating a stack object from FITS files.
+
+        :param data_path: str
+            The path to the parent folder containing fits files, or subfolders with fits files.
+        :param out_path: str
+            The output path to save output plots and pickles/jsons to.  Default is "data.stacked.YYYYMMDD_HHMMSS"
+        :param n_jobs: int
+            The number of jobs to run in parallel when reading in fits files.  Default is -1, meaning
+            as many jobs as are allowed to run in parallel.
+        :param save_pickle: bool
+            Whether or not to save the Stack object as a pickle file.  Default is true.
+        :param save_json: bool
+            Whether or not to save the Stack object as a json file.  Default is false.
+        :param plot_backend: str
+            May be 'pyplot' to use pyplot or 'plotly' to use plotly for plotting.  Default is 'plotly'.
+        :param plot_spec: str, iterable
+            Which spectra to plot individually.  Default is None, which doesn't plot any.
+        :param limits: tuple
+            Limit to only use data in the range of these indices.
+        :param _filters: str, iterable
+            Filter objects to be applied to the Stack.
+        :param name_by: str
+            "folder" or "file" : how to specify object keys, based on the name of the fits file or the folder that the fits
+            file is in.
+        :param properties_tbl: str, iterable
+            A path (or paths) to a table file (.csv, .tbl, .xlsx, .txt, ...) containing properties of the spectra that are
+            being loaded in separately.  The file MUST be in the correct format:
+                - The header must be the first uncommented row in the file
+                - Comments should be marked with properties_comment (Default: "#")
+                - Should be delimited by properties_sep (Default: ",")
+                - The properties_name_col (Default: 0)th column should be the object name, which should match the object
+                  name(s) read in from fits files/folders.
+                - All other columns should list properties that the user wants to be appended to Spectrum objects.
+        :param properties_sep: str
+            Delimiter for the properties_tbl file.  Default: ","
+        :param properties_comment: str
+            Comment character for the properties_tbl file.  Default: "#"
+        :param properties_name_col: int
+            Index of the column that speicifies object name in the properties_tbl file.  Default: 0.
+        :param progress_bar: bool
+            If True, shows a progress bar for reading in files.  Default is False.
+        :param stack_name: str
+            The name of the stack, for file saving purposes.
+        :return stack: Stack
+            The Stack object.
+        """
+        # Create output paths
+        if not out_path:
+            out_path = 'data.stacked.' + utils.gen_datestr(True)
+        if not os.path.exists(out_path):
+            os.makedirs(out_path)
+        if out_path[-1] != os.sep:
+            out_path += os.sep
+
+        # Gather spectra paths
+        all_spectra = utils.get_filepaths_from_parent(data_path, ['fits', 'fit', 'fit.fz', 'fits.fz'])
+        if limits:
+            all_spectra = all_spectra[limits[0]:limits[1]]
+
+        # Configure filter objects
+        filter_list = []
+        if not _filters:
+            _filters = []
+        if type(_filters) is str:
+            _filters = [_filters]
+        for _filter in _filters:
+            filter_list.append(bfilters.Filter.from_str(_filter))
+        stack = cls(filters=filter_list, progress_bar=progress_bar)
+
+        assert name_by in ('file', 'folder', 'id'), "name_by must be one of ['file', 'folder', 'id']"
+
+        def make_spec(filepath):
+            name = None
+            if name_by == 'id':
+                name = None
+            elif name_by == 'file':
+                name = filepath.split(os.sep)[-1]
+            elif name_by == 'folder':
+                name = filepath.split(os.sep)[-2]
+            # elif name_by == 'iau':
+            #     name = None
+            ispec = Spectrum.from_fits(filepath, name=name)
+            return ispec
+
+        print('Loading in spectra...')
+        range_ = tqdm.tqdm(all_spectra) if progress_bar else all_spectra
+        specs = Parallel(n_jobs=n_jobs)(delayed(make_spec)(fpath) for fpath in range_)
+        for ispec in specs:
+            stack.add_spec(ispec)
+        print('Done.')
+
+        if properties_tbl:
+            print('Loading in table data...')
+            if type(properties_tbl) is str:
+                properties_tbl = [properties_tbl]
+            if type(properties_sep) is str:
+                properties_sep = [properties_sep] * len(properties_tbl)
+            if type(properties_comment) is str:
+                properties_comment = [properties_comment] * len(properties_tbl)
+            if type(properties_name_col) in (int, bool):
+                properties_name_col = [properties_name_col] * len(properties_tbl)
+            for tbl, sep, comm, name in zip(properties_tbl, properties_sep, properties_comment, properties_name_col):
+                tbl_data = pd.read_csv(tbl, delimiter=sep, comment=comm,
+                                       skipinitialspace=True, header=0, index_col=name)
+                range_ = tqdm.tqdm(tbl_data.index) if progress_bar else tbl_data.index
+                for namei in range_:
+                    # assert namei in stack.keys(), f"ERROR: {namei} not found in Stack!"
+                    if str(int(namei)) not in stack:
+                        print(f"WARNING: {int(namei)} not found in stack!")
+                        continue
+                    for tbl_col in tbl_data.columns:
+                        stack[str(int(namei))].data[tbl_col] = tbl_data[tbl_col][namei]
+            print('Done.')
+
+        if save_pickle:
+            stack.save_pickle(out_path + stack_name + '.pkl')
+        if save_json:
+            stack.save_json(out_path + stack_name + '.json')
+
+        return stack
+
+    @classmethod
+    @utils.timer(name='Quick Sim Load')
+    def quick_sim_stack(cls, line, size=10_000, wave_range=(-20, 20), rv='random', rv_lim=(-100, 100), vsini='random',
+                        vsini_lim=(0, 500), noise_std='random', noise_std_lim=(0.1, 1),
+                        amplitudes=None, widths=None,
+                        out_path=None, n_jobs=-1, save_pickle=True, save_json=False,
+                        _filters=None, seeds=None, progress_bar=False):
+        """
+        The main driver for the stacking code.
+
+        :param line: float
+            Wavelength of the line to generate simulated spectra for.
+        :param size: int
+            The number of randomized simulated spectra to generate and stack.
+        :param wave_range: tuple
+            Range of wavelengths around the line to generate spectra over.
+        :param rv: str, float
+            Radial velocity of simulated spectra.  'random' to make each one random.
+        :param rv_lim: tuple
+            Limits on randomized radial velocities of spectra, in km/s.
+        :param vsini: str, float
+            Rotational velocity of simulated spectra. 'random' to make each one random.
+        :param vsini_lim: tuple
+            Limits on randomized rotational velocities of spectra, in km/s.
+        :param noise_std: str, float
+            The standard deviation of the noise to be injected in the simulated spectra.  'random' to make each one random.
+        :param noise_std_lim: tuple
+            Limits on randomized noise standard deviations of spectra.
+        :param amplitudes: iterable
+            A list of amplitudes for each simulated spectra.  Must match the length of widths and seeds.  Default is 1.
+        :param widths: iterable
+            A list of widths for each simiulated spectra.  Must match the length of amplitudes and seeds.  Default is 0.1.
+        :param seeds: iterable
+            A list of seeds to use in generating random noise for each spectrum.  Must match the length of amplitudes and
+            widths.  Default is None (random).
+        :param out_path: str
+            The output path to save output plots and pickles/jsons to.  Default is "data.stacked.YYYYMMDD_HHMMSS"
+        :param n_jobs: int
+            The number of jobs to run in parallel when reading in fits files.  Default is -1, meaning
+            as many jobs as are allowed to run in parallel.
+        :param save_pickle: bool
+            Whether or not to save the Stack object as a pickle file.  Default is true.
+        :param save_json: bool
+            Whether or not to save the Stack object as a json file.  Default is false.
+        :param plot_backend: str
+            May be 'pyplot' to use pyplot or 'plotly' to use plotly for plotting.  Default is 'plotly'.
+        :param plot_spec: str, iterable
+            Which spectra to plot individually.  Default is None, which doesn't plot any.
+        :param _filters: str, iterable
+            Filter objects to be applied to the Stack.
+        :param progress_bar: bool
+            If True, shows a progress bar for reading in files.  Default is False.
+        :return stack: Stack
+            The Stack object.
+        """
+        # Create output paths
+        if not out_path:
+            out_path = 'data.stacked.' + utils.gen_datestr(True)
+        if not os.path.exists(out_path):
+            os.makedirs(out_path)
+        out_path += os.sep
+
+        # Configure filter objects
+        filter_list = []
+        if not _filters:
+            _filters = []
+        if type(_filters) is str:
+            _filters = [_filters]
+        for _filter in _filters:
+            filter_list.append(bfilters.Filter.from_str(_filter))
+        stack = cls(filters=filter_list, progress_bar=progress_bar)
+
+        def make_spec(A, sigma, seed):
+            ispec = Spectrum.simulated(line, wave_range, rv, rv_lim, vsini, vsini_lim, noise_std,
+                                       noise_std_lim, a=A, sigma=sigma, seed=seed)
+            return ispec
+
+        print('Generating spectra...')
+        if amplitudes is None:
+            amplitudes = np.ones(size)
+        if widths is None:
+            widths = np.ones(size) * 0.1
+        if seeds is None:
+            seeds = [None] * size
+        range_ = tqdm.tqdm(zip(amplitudes, widths, seeds)) if progress_bar else zip(amplitudes, widths, seeds)
+        specs = Parallel(n_jobs=n_jobs)(delayed(make_spec)(ai, wi, si) for ai, wi, si in range_)
+        for ispec in specs:
+            stack.add_spec(ispec)
+
+        if save_pickle:
+            stack.save_pickle(out_path + 'stacked_data.pkl')
+        if save_json:
+            stack.save_json(out_path + 'stacked_data.json')
+
+        return stack
 
     def calc_norm_region(self, wave_grid):
         """

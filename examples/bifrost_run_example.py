@@ -6,8 +6,7 @@ import sys
 import numpy as np
 # Import the bifrost module
 # NOTE: this WILL NOT WORK until you have installed the module with `pip install .` from the terminal.
-import bifrost
-import bifrost.factory as factory
+import bifrost as bf
 
 # Set up some configurations and file paths
 # First, the path to the data
@@ -21,9 +20,9 @@ stack_path = os.path.join(out_path, 'stacked_data.pkl')
 line_name = 'FeVII'
 line = 6087
 
-# Make the stack using the handy factory method, but only if it doesn't already exist:
+# Make the stack using the handy classmethod, but only if it doesn't already exist:
 if not os.path.exists(stack_path):
-    stack = factory.quick_fits_stack(path, out_path=out_path)
+    stack = bf.Stack.quick_fits_stack(path, out_path=out_path)
     # Stack all the spectra and plot the results
     stack()
     stack.plot_stacked(os.path.join(out_path, 'stacked_plot'))
