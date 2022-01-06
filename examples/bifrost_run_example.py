@@ -35,7 +35,7 @@ for i in range(len(stack)):
     stack[i].calc_line_snr((line-10, line+10), 'snr_'+str(line))
 
 # Calculate flux line ratios for FeVII 6087
-_wl, _wr, fluxr_dict = stack.calc_line_flux_ratios(line, dw=10, save=True, conf=None, path=out_path)
+_wl, _wr, fluxr_dict, info_dict = stack.calc_line_flux_ratios(line, dw=10, save=True, conf=None, path=out_path)
 # Take the results and turn them into plots and output files
 ss = stack.line_flux_report(fluxr_dict, line=line, dw=10, norm_dw=(_wl, _wr), path=out_path, plot_backend='plotly', ylim=(0, 2),
                             title_text_conf=None, title_text_snr='snr_'+str(line), plot_spec='all', conf_dict=None,

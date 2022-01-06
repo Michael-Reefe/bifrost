@@ -1911,7 +1911,7 @@ class Stack(Spectra):
         return stacked_flux, stacked_err
 
     @utils.timer(name='Line Flux Integration')
-    def calc_line_flux_ratios(self, line, dw=5, tag='', save=False, conf=None, path=''):
+    def calc_line_flux_ratios(self, line, dw=5, tag='', sky_lines=None, save=False, conf=None, path=''):
         """
         Calculate the integrated flux ratios of each spectra compared to the stacked spectrum.
 
@@ -1921,6 +1921,8 @@ class Stack(Spectra):
             The distance to the left/right of the center wavelength to integrate (angstroms).
         :param tag: string
             An optional tag string to add to the end of saved file names.
+        :param sky_lines: optional, list
+            Wavelengths of sky lines to watch out for -- flag if the line is close to a sky line.
         :param save: boolean
             If True, saves the line flux ratios as a json file.
         :param conf: str
@@ -1931,8 +1933,11 @@ class Stack(Spectra):
             Dictionary of keys: spectra names, and values: tuple(integrated flux, error) / stacked spectrum integrated
             flux.
         """
+        if sky_lines is None:
+            sky_lines = [5578.5, 5894.6, 6301.7, 7246.0]
         out = {0: {}}
         confs = {0: {}}
+        info = {0: {}}
         self.correct_spectra()
         # if len(self.universal_grid) == 0:
         #     raise ValueError("Stacked spectrum has not yet been generated!")
@@ -1995,9 +2000,22 @@ class Stack(Spectra):
             window_center = np.where((full_wave > line - dw) & (full_wave < line + dw))[0]
             rms = np.sqrt(np.mean(full_flux[window_lr] ** 2))
 
+
             out[0][self[i].name] = (np.mean(full_flux[window_center]) / rms).astype(np.float64)
+            # Sigma-clipping to find the width of the line in pixels
+            info[0][self[i].name] = {}
+            npix = np.where(full_flux[window_center] >= 3*rms)[0]
+            cont = np.where(np.diff(npix) < 2)[0]
+            # pixels = len(cont) + 1 if np.diff(npix)[-1] in np.diff(npix)[cont] else len(cont)
+            goodpix = [] if len(npix) == 0 else npix[np.concatenate((cont, [-1]))]
+            info[0][self[i].name]['npix'] = len(goodpix)
+            for _line in sky_lines:
+                rest = maths.cosmological_redshift(_line, self[i].redshift)
+                info[0][self[i].name][f'sky_flag_{_line}'] = 1 if np.abs(rest - line) <= 2*dw else 0
             if conf:
                 confs[0][self[i].name] = self[i].data[conf]
+
+            # breakpoint()
 
         # OLD INTEGRATION METHOD, DEPRECATED, COMPARING WITH STACK:
         # for i in range(len(self.universal_grid)):
@@ -2036,10 +2054,13 @@ class Stack(Spectra):
             serialized = json.dumps(out, indent=4)
             with open(path + os.sep + 'line_flux_ratios_' + str(line) + '_' + tag + '.json', 'w') as handle:
                 handle.write(serialized)
+            serialized2 = json.dumps(info, indent=4)
+            with open(path + os.sep + 'line_flux_info_' + str(line) + '_' + tag + '.json', 'w') as handle:
+                handle.write(serialized2)
         if conf:
-            return _wl, _wr, out, confs
+            return _wl, _wr, out, confs, info
         else:
-            return _wl, _wr, out
+            return _wl, _wr, out, info
 
     def plot_stacked(self, fname_base, emline_color="rebeccapurple", absorp_color="darkgoldenrod", cline_color="cyan",
                      cline_labels='all', backend='plotly'):
