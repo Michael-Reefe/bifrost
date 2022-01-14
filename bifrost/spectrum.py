@@ -1829,9 +1829,9 @@ class Stack(Spectra):
     @njit
     def _norm(data, error, region):
         med = np.nanmedian(data[region])
-        data /= med
-        error /= med
-        return data, error
+        data_out = data / med
+        error_out = error / med
+        return data_out, error_out
 
     # def _renorm_stack(self, norm_region):
     #     """
