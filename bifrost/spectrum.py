@@ -14,6 +14,7 @@ import pandas as pd
 from numba import jit, njit, prange
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+import matplotlib.colors as mplcolor
 import plotly.subplots
 import plotly.graph_objects
 from joblib import Parallel, delayed
@@ -221,8 +222,8 @@ class Spectrum:
         return self.data["agn_class"]
 
     def plot(self, convolve_width=0, emline_color="rebeccapurple", absorp_color="darkgoldenrod", cline_color="cyan",
-             overwrite=False, fname=None, backend='plotly', _range=None, ylim=None, normalized=False, title_text=None,
-             plot_model=None, shade_reg=None):
+             overwrite=False, fname=None, backend='plotly', _range=None, ylim=None, title_text=None,
+             plot_model=None, shade_reg=None, overlays=None):
         """
         Plot the spectrum.
 
@@ -245,15 +246,15 @@ class Spectrum:
             Limits on the x-data between two wavelengths.
         :param ylim: optional, tuple
             Limits on the y-data between two fluxes.
-        :param normalized: optional, bool
-            If true, the y axis units are displayed as "normalized".  Otherwise, they are displayed as
-            "10^-17 erg cm^-2 s^-1 angstrom^-1". Default is false.
         :param title_text: optional, str
             Text to append to the title of the plot.
         :param plot_model: optional, tuple
             A tuple of two strings corresponding to keys for the data dict to plot x and y data overtop of the spectrum.
         :param shade_reg: optional, list
             A list of tuples indicating region(s) within the plot to shade
+        :param overlays: optional, list
+            A list containing other Spectrum objects (not a Spectra/Stack object) which are to be plotted in addition
+            to the current Spectrum object.
         :return None:
         """
         # Make sure corrections have been applied
@@ -287,14 +288,35 @@ class Spectrum:
             fig, ax = plt.subplots(figsize=(20, 10))
             linewidth = .5
             linestyle = '--'
-            ax.plot(wave, spectrum, '-', color='k', lw=linewidth)
-            if plot_model:
+            ax.plot(wave, spectrum, '-', color='k', lw=linewidth, label=self.name)
+            if plot_model is not None:
                 if plot_model[0] in self.data and plot_model[1] in self.data:
                     ax.plot(self.data[plot_model[0]], self.data[plot_model[1]], '-', color='r', lw=linewidth)
                 else:
                     print(f"WARNING: {plot_model[0]} or {plot_model[1]} not found in {self.name}'s data!")
-            ax.fill_between(wave, spectrum - error, spectrum + error, color='mediumaquamarine', alpha=0.5)
-
+            if overlays is not None:
+                for overlay in overlays:
+                    overlay.apply_corrections()
+                    if convolve_width > 0:
+                        kernel = astropy.convolution.Box1DKernel(convolve_width)
+                        speci = astropy.convolution.convolve(overlay.flux, kernel)
+                        erri = astropy.convolution.convolve(overlay.error, kernel)
+                    else:
+                        speci = overlay.flux
+                        erri = overlay.error
+                    speci[speci < 0] = 0
+                    erri[erri < 0] = 0
+                    if _range:
+                        good = np.where((_range[0] < overlay.wave) & (overlay.wave < _range[1]))[0]
+                        wavei = overlay.wave[good]
+                        speci = speci[good]
+                        erri = erri[good]
+                    else:
+                        wavei = overlay.wave
+                    ax.plot(wavei, speci, '-', lw=.5, label=overlay.name)
+                ax.legend()
+            else:
+                ax.fill_between(wave, spectrum - error, spectrum + error, color='mediumaquamarine', alpha=0.5)
             # Plot emission and absorption lines
 
             # OVI, Ly-alpha, NV, OI, CII, SiIV, SiIV/OIV, CIV, HeII
@@ -324,7 +346,7 @@ class Spectrum:
             # Set up axis labels and formatting
             fontsize = 20
             ax.set_xlabel(r'$\lambda_{\rm{rest}}$ ($\rm{\AA}$)', fontsize=fontsize)
-            if not normalized:
+            if not self.normalized:
                 ax.set_ylabel(r'$f_\lambda$ ($10^{-17}$ erg cm$^{-2}$ s$^{-1}$ $\rm{\AA}^{-1}$)', fontsize=fontsize)
             else:
                 ax.set_ylabel(r'$f_\lambda$ (normalized)', fontsize=fontsize)
@@ -349,15 +371,18 @@ class Spectrum:
             fig = plotly.subplots.make_subplots(rows=1, cols=1)
             linewidth = .5
             fig.add_trace(plotly.graph_objects.Scatter(x=wave, y=spectrum, line=dict(color='black', width=linewidth),
-                                                       name='Data', showlegend=False))
+                                                       name='Data' if overlays is None else self.name + ' data',
+                                                       showlegend=False if overlays is None else True))
             fig.add_trace(plotly.graph_objects.Scatter(x=wave, y=spectrum + error,
                                                        line=dict(color='#60dbbd', width=0),
-                                                       fillcolor='rgba(96, 219, 189, 0.6)',
-                                                       name='Upper Bound', showlegend=False))
+                                                       fillcolor='rgba(96, 219, 189, 0.6)' if overlays is None else 'rgba(0, 0, 0, 0.6)',
+                                                       name='Upper Bound' if overlays is None else self.name + ' upper bound',
+                                                       showlegend=False if overlays is None else True))
             fig.add_trace(plotly.graph_objects.Scatter(x=wave, y=spectrum - error,
                                                        line=dict(color='#60dbbd', width=0),
-                                                       fillcolor='rgba(96, 219, 189, 0.6)',
-                                                       fill='tonexty', name='Lower Bound', showlegend=False))
+                                                       fillcolor='rgba(96, 219, 189, 0.6)' if overlays is None else 'rgba(0, 0, 0, 0.6)',
+                                                       fill='tonexty', name='Lower Bound' if overlays is None else self.name + ' lower bound',
+                                                       showlegend=False if overlays is None else True))
             if plot_model:
                 if plot_model[0] in self.data and plot_model[1] in self.data:
                     fig.add_trace(plotly.graph_objects.Scatter(x=self.data[plot_model[0]], y=self.data[plot_model[1]],
@@ -365,6 +390,41 @@ class Spectrum:
                                                                name='Model', showlegend=False))
                 else:
                     print(f"WARNING: {plot_model[0]} or {plot_model[1]} not found in {self.name}'s data!")
+            if overlays is not None:
+                colorlist = ['#7fffd4', '#8a2be2', '#d2691e', '#6495ed', '#006400', '#e9967a', '#2f4f4f', '#1e90ff',
+                             '#adff2f', '#4b0082', '#20b2aa', '#7b68ee']
+                for i, overlay in enumerate(overlays):
+                    overlay.apply_corrections()
+                    if convolve_width > 0:
+                        kernel = astropy.convolution.Box1DKernel(convolve_width)
+                        speci = astropy.convolution.convolve(overlay.flux, kernel)
+                        erri = astropy.convolution.convolve(overlay.error, kernel)
+                    else:
+                        speci = overlay.flux
+                        erri = overlay.error
+                    speci[speci < 0] = 0
+                    erri[erri < 0] = 0
+                    if _range:
+                        good = np.where((_range[0] < overlay.wave) & (overlay.wave < _range[1]))[0]
+                        wavei = overlay.wave[good]
+                        speci = speci[good]
+                        erri = erri[good]
+                    else:
+                        wavei = overlay.wave
+                    fig.add_trace(plotly.graph_objects.Scatter(x=wavei, y=speci, line=dict(color=colorlist[i % len(colorlist)], width=linewidth),
+                                                               name=overlay.name + ' data', showlegend=True))
+                    fig.add_trace(plotly.graph_objects.Scatter(x=wavei, y=speci+erri, line=dict(color=colorlist[i % len(colorlist)], width=0),
+                                                               name=overlay.name + ' upper bound',
+                                                               fillcolor='rgba(' + str(int(colorlist[i % len(colorlist)][1:3], 16)) +
+                                                                     ', ' + str(int(colorlist[i % len(colorlist)][3:5], 16)) +
+                                                                     ', ' + str(int(colorlist[i % len(colorlist)][5:7], 16)) + ', 0.6)',
+                                                               showlegend=True))
+                    fig.add_trace(plotly.graph_objects.Scatter(x=wavei, y=speci-erri, line=dict(color=colorlist[i % len(colorlist)], width=0),
+                                                               fillcolor='rgba(' + str(int(colorlist[i % len(colorlist)][1:3], 16)) +
+                                                                         ', ' + str(int(colorlist[i % len(colorlist)][3:5], 16)) +
+                                                                         ', ' + str(int(colorlist[i % len(colorlist)][5:7], 16)) + ', 0.6)',
+                                                               fill='tonexty', name=overlay.name + ' lower bound', showlegend=True))
+                fig.update_layout(showlegend=True)
             emlines = np.array(
                 [1033.820, 1215.240, 1240.810, 1305.530, 1335.310, 1397.610, 1399.800, 1549.480, 1640.400,
                  1665.850, 1857.400, 1908.734, 2326.000, 2439.500, 2799.117, 3346.790, 3426.850, 3727.092,
@@ -386,13 +446,20 @@ class Spectrum:
                               annotation_text=name, annotation_position='top right', annotation_font_size=12)
             for line in abslines:
                 fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#d1c779')
-            if not normalized:
+            if not self.normalized:
                 y_title = '$f_\\lambda\\ (10^{-17} {\\rm erg} {\\rm s}^{-1} {\\rm cm}^{-2} Å^{-1})$'
             else:
                 y_title = '$f_\\lambda\\ ({\\rm normalized})$'
             title = '${\\rm %s}, z=%.5f$' % (self.name, self.redshift)
+            if overlays is not None:
+                title = '$' + '\ \| \ '.join([r'{\rm %s}, z=%.5f' % (name, redshift) for name, redshift in zip(
+                    [self.name] + [o.name for o in overlays], [self.redshift] + [o.redshift for o in overlays]
+                )]) + '$'
             if title_text:
-                title += ', ' + title_text
+                if '$' in title_text:
+                    title = '$' + title.replace('$','') + '\ \| \ ' + title_text.replace('$','') + '$'
+                else:
+                    title += ', ' + title_text
             fig.update_layout(
                 yaxis_title=y_title,
                 xaxis_title='$\\lambda_{\\rm rest}\\ (Å)$',
@@ -426,7 +493,7 @@ class Spectrum:
                 constrain='domain'
             )
             fig.write_html(fname, include_mathjax="cdn")
-            # fig.write_image(fname.replace('.html', '.pdf'), width=1280, height=540)
+            fig.write_image(fname.replace('.html', '.pdf'), width=1280, height=540)
 
     def save_pickle(self):
         """
