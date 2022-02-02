@@ -370,15 +370,16 @@ class Spectrum:
         elif backend == 'plotly':
             fig = plotly.subplots.make_subplots(rows=1, cols=1)
             linewidth = .5
+            good = np.where(np.isfinite(spectrum) & np.isfinite(error))[0]
             fig.add_trace(plotly.graph_objects.Scatter(x=wave, y=spectrum, line=dict(color='black', width=linewidth),
                                                        name='Data' if overlays is None else self.name + ' data',
                                                        showlegend=False if overlays is None else True))
-            fig.add_trace(plotly.graph_objects.Scatter(x=wave, y=spectrum + error,
+            fig.add_trace(plotly.graph_objects.Scatter(x=wave[good], y=(spectrum + error)[good],
                                                        line=dict(color='#60dbbd', width=0),
                                                        fillcolor='rgba(96, 219, 189, 0.6)' if overlays is None else 'rgba(0, 0, 0, 0.6)',
                                                        name='Upper Bound' if overlays is None else self.name + ' upper bound',
                                                        showlegend=False if overlays is None else True))
-            fig.add_trace(plotly.graph_objects.Scatter(x=wave, y=spectrum - error,
+            fig.add_trace(plotly.graph_objects.Scatter(x=wave[good], y=(spectrum - error)[good],
                                                        line=dict(color='#60dbbd', width=0),
                                                        fillcolor='rgba(96, 219, 189, 0.6)' if overlays is None else 'rgba(0, 0, 0, 0.6)',
                                                        fill='tonexty', name='Lower Bound' if overlays is None else self.name + ' lower bound',
@@ -411,15 +412,16 @@ class Spectrum:
                         erri = erri[good]
                     else:
                         wavei = overlay.wave
+                    good = np.where(np.isfinite(speci) & np.isfinite(erri))[0]
                     fig.add_trace(plotly.graph_objects.Scatter(x=wavei, y=speci, line=dict(color=colorlist[i % len(colorlist)], width=linewidth),
                                                                name=overlay.name + ' data', showlegend=True))
-                    fig.add_trace(plotly.graph_objects.Scatter(x=wavei, y=speci+erri, line=dict(color=colorlist[i % len(colorlist)], width=0),
+                    fig.add_trace(plotly.graph_objects.Scatter(x=wavei[good], y=(speci+erri)[good], line=dict(color=colorlist[i % len(colorlist)], width=0),
                                                                name=overlay.name + ' upper bound',
                                                                fillcolor='rgba(' + str(int(colorlist[i % len(colorlist)][1:3], 16)) +
                                                                      ', ' + str(int(colorlist[i % len(colorlist)][3:5], 16)) +
                                                                      ', ' + str(int(colorlist[i % len(colorlist)][5:7], 16)) + ', 0.6)',
                                                                showlegend=True))
-                    fig.add_trace(plotly.graph_objects.Scatter(x=wavei, y=speci-erri, line=dict(color=colorlist[i % len(colorlist)], width=0),
+                    fig.add_trace(plotly.graph_objects.Scatter(x=wavei[good], y=(speci-erri)[good], line=dict(color=colorlist[i % len(colorlist)], width=0),
                                                                fillcolor='rgba(' + str(int(colorlist[i % len(colorlist)][1:3], 16)) +
                                                                          ', ' + str(int(colorlist[i % len(colorlist)][3:5], 16)) +
                                                                          ', ' + str(int(colorlist[i % len(colorlist)][5:7], 16)) + ', 0.6)',
@@ -1041,7 +1043,7 @@ class Stack(Spectra):
     def quick_fits_stack(cls, data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=False,
                          limits=None, _filters=None, name_by='id', properties_tbl=None,
                          properties_comment='#', properties_sep=',', properties_name_col=0, progress_bar=True,
-                         stack_name='stacked_data'):
+                         stack_name='stacked_data', **kwargs):
         """
         A convenience function for quickly creating a stack object from FITS files.
 
@@ -1110,7 +1112,7 @@ class Stack(Spectra):
             _filters = [_filters]
         for _filter in _filters:
             filter_list.append(bfilters.Filter.from_str(_filter))
-        stack = cls(filters=filter_list, progress_bar=progress_bar)
+        stack = cls(filters=filter_list, progress_bar=progress_bar, **kwargs)
 
         assert name_by in ('file', 'folder', 'id'), "name_by must be one of ['file', 'folder', 'id']"
 
@@ -2244,14 +2246,15 @@ class Stack(Spectra):
                     text = [str(len(self)) for _ in range(len(self.stacked_flux[bin_num]))]
                 else:
                     raise ValueError('invalid value for self.wave_criterion!')
+                good = np.where(np.isfinite(flux) & np.isfinite(err))[0]
                 fig.add_trace(plotly.graph_objects.Scatter(x=wave, y=flux, line=dict(color='black', width=linewidth),
                                                            name='Data', showlegend=False, text=text,
                                                            hovertemplate='%{y} <b>Number of Spectra:</b> %{text}'))
-                fig.add_trace(plotly.graph_objects.Scatter(x=wave, y=flux + err,
+                fig.add_trace(plotly.graph_objects.Scatter(x=wave[good], y=(flux + err)[good],
                                                            line=dict(color='#60dbbd', width=0),
                                                            fillcolor='rgba(96, 219, 189, 0.6)',
                                                            name='Upper Bound', showlegend=False, hovertemplate='%{y}'))
-                fig.add_trace(plotly.graph_objects.Scatter(x=wave, y=flux - err,
+                fig.add_trace(plotly.graph_objects.Scatter(x=wave[good], y=(flux - err)[good],
                                                            line=dict(color='#60dbbd', width=0),
                                                            fillcolor='rgba(96, 219, 189, 0.6)',
                                                            fill='tonexty', name='Lower Bound', showlegend=False,
@@ -2851,7 +2854,8 @@ class Stack(Spectra):
                 maxy = -9999
                 miny = 9999
                 for m in range(2):
-                    good1 = np.where((reg[0] < self[mins[m, k]].wave) & (self[mins[m, k]].wave < reg[1]))[0]
+                    good1 = np.where((reg[0] < self[mins[m, k]].wave) & (self[mins[m, k]].wave < reg[1]) &
+                                     np.isfinite(self[mins[m, k]].flux) & np.isfinite(self[mins[m, k]].error))[0]
                     fig.add_trace(
                         plotly.graph_objects.Scatter(x=self[mins[m, k]].wave[good1], y=self[mins[m, k]].flux[good1],
                                                      line=dict(color='black', width=linewidth),
