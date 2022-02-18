@@ -151,11 +151,13 @@ class Spectrum:
         if 'snr' not in self.data:
             med = np.nanmedian(self.flux)
             self.data['snr'] = 1 / np.mean(self.error[np.where(np.isfinite(self.error))[0]] / med)
+        return self.data['snr']
 
     def calc_line_snr(self, wave_range, key):
         good = np.where(np.isfinite(self.error) & (wave_range[0] < self.wave) & (self.wave < wave_range[1]))[0]
         med = np.nanmedian(self.flux[good])
         self.data[key] = 1 / np.mean(self.error[good] / med)
+        return self.data[key]
 
     @property
     def corrected(self):
@@ -201,7 +203,7 @@ class Spectrum:
         """
         dx, dy = self._calc_agn_dist(bpt_1, bpt_2, ref_point)
         d = np.hypot(dx, dy)
-        # AGN fraction = 1 / distance^2
+        # AGN fraction = 1 / distance
         self.data["agn_frac"] = 1 / d
         return self.data["agn_frac"]
 
@@ -221,7 +223,7 @@ class Spectrum:
         self.data["agn_class"] = agn
         return self.data["agn_class"]
 
-    def plot(self, convolve_width=0, emline_color="rebeccapurple", absorp_color="darkgoldenrod", cline_color="cyan",
+    def plot(self, convolve_width=0, line_labels=True, emline_color="rebeccapurple", absorp_color="darkgoldenrod", cline_color="cyan",
              overwrite=False, fname=None, backend='plotly', _range=None, ylim=None, title_text=None,
              plot_model=None, shade_reg=None, overlays=None):
         """
@@ -229,6 +231,8 @@ class Spectrum:
 
         :param convolve_width: optional, int
             The width of convolution performed before plotting the spectrum with a Box1DKernel
+        :param line_labels: optional, bool
+            Whether or not to plot labels for emission lines, absorption lines, and coronal lines.  Default is True.
         :param emline_color: optional, str
             If backend is pyplot, this specifies the color of emission lines plotted.  Default is 'rebeccapurple'.
         :param absorp_color: optional, str
@@ -283,6 +287,7 @@ class Spectrum:
         else:
             wave = self.wave
 
+        # Standard matplotlib backend (non-interactive)
         if backend == 'pyplot':
             # Plot the spectrum and error
             fig, ax = plt.subplots(figsize=(20, 10))
@@ -317,31 +322,32 @@ class Spectrum:
                 ax.legend()
             else:
                 ax.fill_between(wave, spectrum - error, spectrum + error, color='mediumaquamarine', alpha=0.5)
+
             # Plot emission and absorption lines
+            if line_labels:
+                # OVI, Ly-alpha, NV, OI, CII, SiIV, SiIV/OIV, CIV, HeII
+                # OIII, AlIII, CIII, CII, NeIV, MgII, [OII]
+                # [OII], H-delta, H-gamma, [OIII], H-beta, [OIII], [OIII], [OI], [OI]
+                # [NII], H-alpha, [NII], [SII], [SII]
+                emlines = np.array(
+                    [1033.820, 1215.240, 1240.810, 1305.530, 1335.310, 1397.610, 1399.800, 1549.480, 1640.400,
+                     1665.850, 1857.400, 1908.734, 2326.000, 2439.500, 2799.117, 3727.092,
+                     3729.875, 4102.890, 4341.680, 4364.436, 4862.680, 4960.295, 5008.240, 6300.304, 6363.776,
+                     6549.860, 6564.610, 6585.270, 6718.290, 6732.670])
+                for line in emlines:
+                    ax.axvline(line, color=emline_color, lw=linewidth, linestyle=linestyle, alpha=0.5)
+                # Ne V, Ne V*, Fe VII, Fe V, Fe V, Ne III (not coronal), Fe V, Fe VII, Fe VI, Fe VII, Fe VI, Fe VII, Fe XIV,
+                # Ca V, Fe VI, Ar X, Fe VII, Fe VII*, Fe X, Fe XI
+                clines = np.array(
+                    [3346.790, 3426.850, 3759, 3839, 3891, 3970, 4181, 4893, 5146, 5159, 5176, 5276, 5303, 5309, 5335,
+                     5533, 5720, 6087, 6374.510, 7891.800])
+                for line in clines:
+                    ax.axvline(line, color=cline_color, lw=linewidth * 2, linestyle=linestyle, alpha=0.75)
 
-            # OVI, Ly-alpha, NV, OI, CII, SiIV, SiIV/OIV, CIV, HeII
-            # OIII, AlIII, CIII, CII, NeIV, MgII, [OII]
-            # [OII], H-delta, H-gamma, [OIII], H-beta, [OIII], [OIII], [OI], [OI]
-            # [NII], H-alpha, [NII], [SII], [SII]
-            emlines = np.array(
-                [1033.820, 1215.240, 1240.810, 1305.530, 1335.310, 1397.610, 1399.800, 1549.480, 1640.400,
-                 1665.850, 1857.400, 1908.734, 2326.000, 2439.500, 2799.117, 3727.092,
-                 3729.875, 4102.890, 4341.680, 4364.436, 4862.680, 4960.295, 5008.240, 6300.304, 6363.776,
-                 6549.860, 6564.610, 6585.270, 6718.290, 6732.670])
-            for line in emlines:
-                ax.axvline(line, color=emline_color, lw=linewidth, linestyle=linestyle, alpha=0.5)
-            # Ne V, Ne V*, Fe VII, Fe V, Fe V, Ne III (not coronal), Fe V, Fe VII, Fe VI, Fe VII, Fe VI, Fe VII, Fe XIV,
-            # Ca V, Fe VI, Ar X, Fe VII, Fe VII*, Fe X, Fe XI
-            clines = np.array(
-                [3346.790, 3426.850, 3759, 3839, 3891, 3970, 4181, 4893, 5146, 5159, 5176, 5276, 5303, 5309, 5335,
-                 5533, 5720, 6087, 6374.510, 7891.800])
-            for line in clines:
-                ax.axvline(line, color=cline_color, lw=linewidth * 2, linestyle=linestyle, alpha=0.75)
-
-            # Ca K, Ca H, Mg1b, Na, CaII, CaII, CaII
-            abslines = np.array([3934.777, 3969.588, 5176.700, 5895.600, 8500.3600, 8544.440, 8664.520])
-            for line in abslines:
-                ax.axvline(line, color=absorp_color, lw=linewidth, linestyle=linestyle, alpha=0.5)
+                # Ca K, Ca H, Mg1b, Na, CaII, CaII, CaII
+                abslines = np.array([3934.777, 3969.588, 5176.700, 5895.600, 8500.3600, 8544.440, 8664.520])
+                for line in abslines:
+                    ax.axvline(line, color=absorp_color, lw=linewidth, linestyle=linestyle, alpha=0.5)
 
             # Set up axis labels and formatting
             fontsize = 20
@@ -366,7 +372,11 @@ class Spectrum:
                     ax.axvspan(*sr, color='grey', alpha=0.5)
 
             fig.savefig(fname, dpi=300, bbox_inches='tight')
-            plt.close()
+            plt.clf()
+            plt.cla()
+            plt.close('all')
+
+        # Interactive HTML plots through the plotly backend
         elif backend == 'plotly':
             fig = plotly.subplots.make_subplots(rows=1, cols=1)
             linewidth = .5
@@ -427,27 +437,31 @@ class Spectrum:
                                                                          ', ' + str(int(colorlist[i % len(colorlist)][5:7], 16)) + ', 0.6)',
                                                                fill='tonexty', name=overlay.name + ' lower bound', showlegend=True))
                 fig.update_layout(showlegend=True)
-            emlines = np.array(
-                [1033.820, 1215.240, 1240.810, 1305.530, 1335.310, 1397.610, 1399.800, 1549.480, 1640.400,
-                 1665.850, 1857.400, 1908.734, 2326.000, 2439.500, 2799.117, 3346.790, 3426.850, 3727.092,
-                 3729.875, 4102.890, 4341.680, 4364.436, 4862.680, 4960.295, 5008.240, 6300.304, 6363.776,
-                 6374.510, 6549.860, 6564.610, 6585.270, 6718.290, 6732.670, 7891.800])
-            clines = np.array(
-                [3346.790, 3426.850, 3759, 3839, 3891, 3970, 4181, 4893, 5146, 5159, 5176, 5276, 5303, 5309, 5335,
-                 5533, 5720, 6087, 6374.510, 7891.800])
-            cline_names = np.array(
-                ['[Ne V]', '[Ne V]*', '[Fe VII]', '[Fe V]', '[Fe V]', '[Ne III]', '[Fe V]', '[Fe VII]', '[Fe VI]',
-                 '[Fe VII]', '[Fe VI]', '[Fe VII]', '[Fe XIV]', '[Ca V]', '[Fe VI]', '[Ar X]', '[Fe VII]', '[Fe VII]*',
-                 '[Fe X]', '[Fe XI]'], dtype=str
-            )
-            abslines = np.array([3934.777, 3969.588, 5176.700, 5895.600, 8500.3600, 8544.440, 8664.520])
-            for line in emlines:
-                fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#663399')
-            for line, name in zip(clines, cline_names):
-                fig.add_vline(x=line, line_width=2 * linewidth, line_dash='dot', line_color='#226666',
-                              annotation_text=name, annotation_position='top right', annotation_font_size=12)
-            for line in abslines:
-                fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#d1c779')
+
+            # Plot emission and absoprtion lines
+            if line_labels:
+                emlines = np.array(
+                    [1033.820, 1215.240, 1240.810, 1305.530, 1335.310, 1397.610, 1399.800, 1549.480, 1640.400,
+                     1665.850, 1857.400, 1908.734, 2326.000, 2439.500, 2799.117, 3346.790, 3426.850, 3727.092,
+                     3729.875, 4102.890, 4341.680, 4364.436, 4862.680, 4960.295, 5008.240, 6300.304, 6363.776,
+                     6374.510, 6549.860, 6564.610, 6585.270, 6718.290, 6732.670, 7891.800])
+                clines = np.array(
+                    [3346.790, 3426.850, 3759, 3839, 3891, 3970, 4181, 4893, 5146, 5159, 5176, 5276, 5303, 5309, 5335,
+                     5533, 5720, 6087, 6374.510, 7891.800])
+                cline_names = np.array(
+                    ['[Ne V]', '[Ne V]*', '[Fe VII]', '[Fe V]', '[Fe V]', '[Ne III]', '[Fe V]', '[Fe VII]', '[Fe VI]',
+                     '[Fe VII]', '[Fe VI]', '[Fe VII]', '[Fe XIV]', '[Ca V]', '[Fe VI]', '[Ar X]', '[Fe VII]', '[Fe VII]*',
+                     '[Fe X]', '[Fe XI]'], dtype=str
+                )
+                abslines = np.array([3934.777, 3969.588, 5176.700, 5895.600, 8500.3600, 8544.440, 8664.520])
+                for line in emlines:
+                    fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#663399')
+                for line, name in zip(clines, cline_names):
+                    fig.add_vline(x=line, line_width=2 * linewidth, line_dash='dot', line_color='#226666',
+                                  annotation_text=name, annotation_position='top right', annotation_font_size=12)
+                for line in abslines:
+                    fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#d1c779')
+
             if not self.normalized:
                 y_title = '$f_\\lambda\\ (10^{-17} {\\rm erg} {\\rm s}^{-1} {\\rm cm}^{-2} Å^{-1})$'
             else:
@@ -562,6 +576,7 @@ class Spectrum:
                     if key not in data_dict.keys():
                         data_dict[key] = hdu[3].data[key]
 
+        # This is ridiculous
         hdu.close()
         del hdu
         del t
@@ -658,7 +673,7 @@ class Spectrum:
         :return: Spectrum
             The simulated spectrum object.
         """
-
+        # Use a seed in case the randomization needs to be the same
         rng = np.random.default_rng(seed)
         # Wavelength grid
         wave = np.arange(true_line + wave_range[0] * 2, true_line + wave_range[1] * 2 + 0.1, 1)
@@ -693,6 +708,7 @@ class Spectrum:
         return cls(wave, flux, error, redshift=z, name=name, amp=a, sigma=sigma, snr=snr)
 
     def to_numpy(self, _slice=None):
+        # Convert to a lightweight numpy record array, with just wave, flux, and error information
         if _slice is None:
             return np.array([(w, f, e) for w, f, e in zip(self.wave, self.flux, self.error)],
                             dtype=[('wave', float), ('flux', float), ('err', float)]).view(np.recarray)
@@ -701,6 +717,7 @@ class Spectrum:
                             dtype=[('wave', float), ('flux', float), ('err', float)]).view(np.recarray)
 
     def save_numpy(self, fname=None, compress=True, _slice=None):
+        # Save to a numpy archive file for future use
         if not self.corrected:
             self.apply_corrections()
         record = self.to_numpy(_slice=_slice)
@@ -712,9 +729,20 @@ class Spectrum:
                 fname = self.name + '.npy'
         save(fname, record)
 
-    # Arithmetic definitions
+    @classmethod
+    def from_numpy(cls, filepath, **kwargs):
+        # Create a spectrum object from a previously saved npy or npz file
+        array = np.load(filepath)
+        if type(array) is np.lib.npyio.NpzFile:
+            array = array.f.arr_0
+        return cls(wave=array['wave'], flux=array['flux'], error=array['err'], **kwargs)
+
+    # Arithmetic definitions (unused in the rest of the code, but here for convenience)
+    # Error propagation is correctly attributed in each case (+, -, *, /) to the error spectrum of the new object
 
     def __add__(self, other):
+        # Add the flux of two spectra together
+
         assert np.all(self.wave == other.wave), "Cannot add two spectra if their wave arrays do not match!"
         assert self.corrected & other.corrected, "Cannot add two spectra unless both have been properly corrected for" \
                                                  "redshift and extinction!"
@@ -725,6 +753,8 @@ class Spectrum:
         return result
 
     def __sub__(self, other):
+        # Subtract the flux from two spectra
+
         assert np.all(self.wave == other.wave), "Cannot subtract two spectra if their wave arrays do not match!"
         assert self.corrected & other.corrected, "Cannot subtract two spectra unless both have been properly corrected for" \
                                                  "redshift and extinction!"
@@ -735,6 +765,8 @@ class Spectrum:
         return result
 
     def __mul__(self, other):
+        # Multiply the flux from two spectra
+
         assert np.all(self.wave == other.wave), "Cannot multiply two spectra if their wave arrays do not match!"
         assert self.corrected & other.corrected, "Cannot multiply two spectra unless both have been properly corrected for" \
                                                  "redshift and extinction!"
@@ -746,6 +778,8 @@ class Spectrum:
         return result
 
     def __truediv__(self, other):
+        # Divide the flux from two spectra
+
         assert np.all(self.wave == other.wave), "Cannot divide two spectra if their wave arrays do not match!"
         assert self.corrected & other.corrected, "Cannot divide two spectra unless both have been properly corrected for" \
                                                  "redshift and extinction!"
@@ -1058,10 +1092,6 @@ class Stack(Spectra):
             Whether or not to save the Stack object as a pickle file.  Default is true.
         :param save_json: bool
             Whether or not to save the Stack object as a json file.  Default is false.
-        :param plot_backend: str
-            May be 'pyplot' to use pyplot or 'plotly' to use plotly for plotting.  Default is 'plotly'.
-        :param plot_spec: str, iterable
-            Which spectra to plot individually.  Default is None, which doesn't plot any.
         :param limits: tuple
             Limit to only use data in the range of these indices.
         :param _filters: str, iterable
@@ -1210,10 +1240,6 @@ class Stack(Spectra):
             Whether or not to save the Stack object as a pickle file.  Default is true.
         :param save_json: bool
             Whether or not to save the Stack object as a json file.  Default is false.
-        :param plot_backend: str
-            May be 'pyplot' to use pyplot or 'plotly' to use plotly for plotting.  Default is 'plotly'.
-        :param plot_spec: str, iterable
-            Which spectra to plot individually.  Default is None, which doesn't plot any.
         :param _filters: str, iterable
             Filter objects to be applied to the Stack.
         :param progress_bar: bool
@@ -1982,7 +2008,7 @@ class Stack(Spectra):
     @utils.timer(name='Line Flux Integration')
     def calc_line_flux_ratios(self, line, dw=5, tag='', sky_lines=None, save=False, conf=None, path=''):
         """
-        Calculate the integrated flux ratios of each spectra compared to the stacked spectrum.
+        Calculate the F-number of each spectrum: F = mean flux / RMS of the surrounding spectrum.
 
         :param line: float, int
             The center wavelength at which to integrate (angstroms).
@@ -2011,8 +2037,10 @@ class Stack(Spectra):
         # if len(self.universal_grid) == 0:
         #     raise ValueError("Stacked spectrum has not yet been generated!")
         # self._renorm_stack((line-norm_dw, line+norm_dw))
-
         range_ = tqdm.trange(len(self)) if self.progress_bar else range(len(self))
+
+        # The reference regions need to be adjusted for certain lines since other lines are at +/-30 angstroms and
+        # can bias the result.
         _wr = 30
         _wl = 30
         if 5275 < line < 5277:
@@ -2069,7 +2097,7 @@ class Stack(Spectra):
             window_center = np.where((full_wave > line - dw) & (full_wave < line + dw))[0]
             rms = np.sqrt(np.mean(full_flux[window_lr] ** 2))
 
-
+            # The 0 key is for compatibility with older versions
             out[0][self[i].name] = (np.mean(full_flux[window_center]) / rms).astype(np.float64)
             # Sigma-clipping to find the width of the line in pixels
             info[0][self[i].name] = {}
