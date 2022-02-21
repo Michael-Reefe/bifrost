@@ -12,7 +12,7 @@ import bifrost as bf
 # First, the path to the data
 path = 'example_data'
 # Next, the desired output path (which may not exist yet)
-out_path = 'example_results'
+out_path = 'example_sdss_results'
 # Finally, the path to the stacked pickle object which will be saved for later use
 stack_path = os.path.join(out_path, 'stacked_data.pkl')
 
