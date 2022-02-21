@@ -509,7 +509,7 @@ class Spectrum:
                 constrain='domain'
             )
             fig.write_html(fname, include_mathjax="cdn")
-            fig.write_image(fname.replace('.html', '.pdf'), width=1280, height=540)
+            # fig.write_image(fname.replace('.html', '.pdf'), width=1280, height=540)
 
     def save_pickle(self):
         """
@@ -1583,7 +1583,7 @@ class Stack(Spectra):
             # plot_bgcolor='rgba(0,0,0,0)'
             # )
             fig.write_html(fname_base + '.html', include_mathjax="cdn")
-            fig.write_image(fname_base + '.pdf')
+            # fig.write_image(fname_base + '.pdf')
 
     def kewley_agn_class(self, bpt_1, bpt_2):
         for i, ispec in enumerate(self):
@@ -2339,7 +2339,7 @@ class Stack(Spectra):
                     constrain='domain'
                 )
                 fig.write_html(fname, include_mathjax="cdn")
-                fig.write_image(fname.replace('.html', '.pdf'), width=1280, height=540)
+                # fig.write_image(fname.replace('.html', '.pdf'), width=1280, height=540)
 
     def plot_spectra(self, fname_root, spectra='all', _range=None, ylim=None, title_text=None, backend='plotly',
                      plot_model=None, f=None, shade_reg=None):
@@ -2446,7 +2446,7 @@ class Stack(Spectra):
                     type="log",
                 )
             fig.write_html(fname, include_mathjax="cdn")
-            fig.write_image(fname.replace('.html', '.pdf'))
+            # fig.write_image(fname.replace('.html', '.pdf'))
 
     def plot_agn(self, fname_base, bpt_x, bpt_y, bpt_xerr=None, bpt_yerr=None, labels=None, backend='plotly'):
         """
@@ -2534,9 +2534,9 @@ class Stack(Spectra):
                 constrain='domain'
             )
             fig.write_html(fname, include_mathjax="cdn")
-            fig.write_image(fname.replace('.html', '.pdf'))
+            # fig.write_image(fname.replace('.html', '.pdf'))
 
-    def line_flux_report(self, fluxr_dict, line=6374, dw=10, norm_dw=(30, 30), plot_range=None, ratio_target=4,
+    def line_flux_report(self, fluxr_dict, line=6374, dw=10, norm_dw=(30, 30), plot_range=None, ratio_target=3,
                          plot_backend='plotly', path='',
                          agn_diagnostics=False, ylim=None, title_text_conf=None, title_text_snr=None, tag='',
                          conf_dict=None, conf_target=None, inspect=None, plot_spec='none'):
@@ -2986,7 +2986,7 @@ class Stack(Spectra):
                 fig.update_yaxes(title_font_family="Georgia, Times New Roman, Serif")
 
                 fig.write_html(path + os.sep + 'line_flux_ratios_' + str(k) + '.html', include_mathjax="cdn")
-                fig.write_image(path + os.sep + 'line_flux_ratios_' + str(k) + '.pdf')
+                # fig.write_image(path + os.sep + 'line_flux_ratios_' + str(k) + '.pdf')
 
             if conf_dict:
                 confidences = []
@@ -3058,7 +3058,7 @@ class Stack(Spectra):
 
                     fig.write_html(path + os.sep + 'line_flux_confidence_covar_' + str(k) + '.html',
                                    include_mathjax="cdn")
-                    fig.write_image(path + os.sep + 'line_flux_confidence_covar_' + str(k) + '.pdf')
+                    # fig.write_image(path + os.sep + 'line_flux_confidence_covar_' + str(k) + '.pdf')
 
         else:
             raise NotImplementedError
