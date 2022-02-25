@@ -1130,7 +1130,7 @@ class Stack(Spectra):
             out_path += os.sep
 
         # Gather spectra paths
-        all_spectra = utils.get_filepaths_from_parent(data_path, ['fits', 'fit', 'fit.fz', 'fits.fz'])
+        all_spectra = utils.get_filepaths_from_parent(data_path, ['fits', 'fit', 'fit.fz', 'fits.fz', '.fts', 'FITS', 'FIT', 'FIT.FZ', 'FITS.FZ', '.FTS'])
         if limits:
             all_spectra = all_spectra[limits[0]:limits[1]]
 
