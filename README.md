@@ -1,5 +1,5 @@
 # BIFR&#xd6;ST
-## Black hole Investigations of Forbidden line Radiation in Optical Spectra STacks
+## Black holes Ionizing Forbidden Radiation and Outflows via Simple Tests
 
 This code aims to bridge the gap between stellar mass black holes and supermassive
 black holes, just as the burning rainbow bridge it is named after bridges the gap
@@ -23,7 +23,7 @@ After cloning the repository, you can install locally via pip: ` pip install . `
 - `scipy >= 1.7.0`
 - `joblib >= 1.0.1`
 - `PyAstronomy >= 0.16.0`
-- `kaleido >= 0.2.1
+- `kaleido >= 0.2.1`
 
 <br> I can't guarantee this package will work  for any versions of these requirements
 outside the suggestions above.
