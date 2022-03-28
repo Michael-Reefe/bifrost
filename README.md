@@ -33,8 +33,7 @@ on how many spectra you are stacking at once.*
 
 ## Documentation Summary
 Most of the functions of this module are built around three core objects: `Spectrum`, `Spectra`, 
-and `Stack`. Beginning with the simplest, the `Spectrum` object, here is its constructor:
-
+and `Stack`. 
 Please see the source code for more detailed docstrings for each class and method.
 
 ### Spectrum
@@ -72,6 +71,9 @@ as weights), one must call the Stack object instance directly, i.e. if we have t
 ```python
 # Create the stack object
 stack = bifrost.Stack()
+# Create spectrum objects
+A = bifrost.Spectrum(wave1, flux1, error1, redshift1)
+B = bifrost.Spectrum(wave2, flux2, error2, redshift2)
 # Append Spectrum objects to the stack
 stack.add_spec(A)
 stack.add_spec(B)
