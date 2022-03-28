@@ -3,6 +3,7 @@ import os
 import time
 import pickle
 import json
+import toml
 import copy
 import gc
 import itertools
@@ -539,7 +540,7 @@ class Spectrum:
         data_dict = {}
         with astropy.io.fits.open(filepath) as hdu:
 
-            specobj = hdu[2].data
+            specobj = copy.deepcopy(hdu[2].data)
             z = specobj['z'][0]
             if name is None:
                 name = specobj['SPECOBJID'][0]
@@ -547,14 +548,17 @@ class Spectrum:
                     name = name.strip()
                 else:
                     name = str(name)
+
+            hdr = copy.deepcopy(hdu[0].header)
             try:
-                ra = hdu[0].header['RA']
-                dec = hdu[0].header['DEC']
+                ra = hdr['RA']
+                dec = hdr['DEC']
             except KeyError:
                 ra = specobj['PLUG_RA'][0]
                 dec = specobj['PLUG_DEC'][0]
 
-            t = hdu[1].data
+            t = copy.deepcopy(hdu[1].data)
+            q = copy.deepcopy(hdu[3].data)
 
             # Unpack the spectra
             flux = t['flux']
@@ -566,22 +570,21 @@ class Spectrum:
                 for key in specobj.names:
                     if key not in ('z', 'PLUG_RA', 'PLUG_DEC'):
                         data_dict[key] = specobj[key]
-                for key in hdu[0].header:
+                for key in hdr:
                     if key not in data_dict.keys() and key not in ('RA', 'DEC'):
-                        data_dict[key] = hdu[0].header[key]
-                for key in hdu[1].data.names:
+                        data_dict[key] = hdr[key]
+                for key in t.names:
                     if key not in data_dict.keys() and key not in ('flux', 'loglam', 'ivar'):
-                        data_dict[key] = hdu[1].data[key]
-                for key in hdu[3].data.names:
+                        data_dict[key] = t[key]
+                for key in q.names:
                     if key not in data_dict.keys():
-                        data_dict[key] = hdu[3].data[key]
+                        data_dict[key] = q[key]
 
         # This is ridiculous
         hdu.close()
         del hdu
         del t
         del specobj
-        gc.collect()
 
         # if not name:
         #     name = utils.iauname(ra, dec)
@@ -998,6 +1001,18 @@ class Spectra(dict):
             serialized = json.dumps(serializable, indent=4)
             handle.write(serialized)
 
+    def save_toml(self, filepath):
+        """
+        Save the object contents to a toml file.
+
+        :param filepath: str
+            The path to save the toml file to.
+        :return: None
+        """
+        serializable = copy.deepcopy(self).__dict__
+        with open(filepath, 'w') as handle:
+            toml.dump(serializable, handle, encoder=toml.TomlNumpyEncoder())
+
 
 class Stack(Spectra):
 
@@ -1074,7 +1089,7 @@ class Stack(Spectra):
 
     @classmethod
     @utils.timer(name='Quick FITS Load')
-    def quick_fits_stack(cls, data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=False,
+    def quick_fits_stack(cls, data_path, out_path=None, n_jobs=-1, save_pickle=True, save_json=False, save_toml=False,
                          limits=None, _filters=None, name_by='id', properties_tbl=None,
                          properties_comment='#', properties_sep=',', properties_name_col=0, progress_bar=True,
                          stack_name='stacked_data', **kwargs):
@@ -1193,6 +1208,8 @@ class Stack(Spectra):
             stack.save_pickle(out_path + stack_name + '.pkl')
         if save_json:
             stack.save_json(out_path + stack_name + '.json')
+        if save_toml:
+            stack.save_toml(out_path + stack_name + '.toml')
 
         return stack
 
@@ -1201,7 +1218,7 @@ class Stack(Spectra):
     def quick_sim_stack(cls, line, size=10_000, wave_range=(-20, 20), rv='random', rv_lim=(-100, 100), vsini='random',
                         vsini_lim=(0, 500), noise_std='random', noise_std_lim=(0.1, 1),
                         amplitudes=None, widths=None,
-                        out_path=None, n_jobs=-1, save_pickle=True, save_json=False,
+                        out_path=None, n_jobs=-1, save_pickle=True, save_json=False, save_toml=False,
                         _filters=None, seeds=None, progress_bar=False):
         """
         The main driver for the stacking code.
@@ -1285,6 +1302,8 @@ class Stack(Spectra):
             stack.save_pickle(out_path + 'stacked_data.pkl')
         if save_json:
             stack.save_json(out_path + 'stacked_data.json')
+        if save_toml:
+            stack.save_toml(out_path + 'stacked_data.toml')
 
         return stack
 
@@ -2019,20 +2038,20 @@ class Stack(Spectra):
         :param sky_lines: optional, list
             Wavelengths of sky lines to watch out for -- flag if the line is close to a sky line.
         :param save: boolean
-            If True, saves the line flux ratios as a json file.
+            If True, saves the line flux ratios as a toml file.
         :param conf: str
             Key for a confidence parameter in each spectrum's dictionary to compare to the line flux ratios.
         :param path: str
-            Output path for the json file if 'save' is True.
+            Output path for the toml file if 'save' is True.
         :return out: dict
             Dictionary of keys: spectra names, and values: tuple(integrated flux, error) / stacked spectrum integrated
             flux.
         """
         if sky_lines is None:
             sky_lines = [5578.5, 5894.6, 6301.7, 7246.0]
-        out = {0: {}}
-        confs = {0: {}}
-        info = {0: {}}
+        out = {}
+        confs = {}
+        info = {}
         self.correct_spectra()
         # if len(self.universal_grid) == 0:
         #     raise ValueError("Stacked spectrum has not yet been generated!")
@@ -2098,19 +2117,19 @@ class Stack(Spectra):
             rms = np.sqrt(np.mean(full_flux[window_lr] ** 2))
 
             # The 0 key is for compatibility with older versions
-            out[0][self[i].name] = (np.mean(full_flux[window_center]) / rms).astype(np.float64)
+            out[self[i].name] = (np.mean(full_flux[window_center]) / rms).astype(np.float64)
             # Sigma-clipping to find the width of the line in pixels
-            info[0][self[i].name] = {}
+            info[self[i].name] = {}
             npix = np.where(full_flux[window_center] >= 3*rms)[0]
             cont = np.where(np.diff(npix) < 2)[0]
             # pixels = len(cont) + 1 if np.diff(npix)[-1] in np.diff(npix)[cont] else len(cont)
             goodpix = [] if len(npix) == 0 else npix[np.concatenate((cont, [-1]))]
-            info[0][self[i].name]['npix'] = len(goodpix)
+            info[self[i].name]['npix'] = len(goodpix)
             for _line in sky_lines:
                 rest = maths.cosmological_redshift(_line, self[i].redshift)
-                info[0][self[i].name][f'sky_flag_{_line}'] = 1 if np.abs(rest - line) <= 2*dw else 0
+                info[self[i].name][f'sky_flag_{_line}'] = 1 if np.abs(rest - line) <= 2*dw else 0
             if conf:
-                confs[0][self[i].name] = self[i].data[conf]
+                confs[self[i].name] = self[i].data[conf]
 
             # breakpoint()
 
@@ -2148,12 +2167,10 @@ class Stack(Spectra):
         #     print('Done.')
 
         if save:
-            serialized = json.dumps(out, indent=4)
-            with open(path + os.sep + 'line_flux_ratios_' + str(line) + '_' + tag + '.json', 'w') as handle:
-                handle.write(serialized)
-            serialized2 = json.dumps(info, indent=4)
-            with open(path + os.sep + 'line_flux_info_' + str(line) + '_' + tag + '.json', 'w') as handle:
-                handle.write(serialized2)
+            with open(path + os.sep + 'line_flux_ratios_' + str(line) + '_' + tag + '.toml', 'w') as handle:
+                toml.dump(out, handle, encoder=toml.TomlNumpyEncoder())
+            with open(path + os.sep + 'line_flux_info_' + str(line) + '_' + tag + '.toml', 'w') as handle:
+                toml.dump(info, handle, encoder=toml.TomlNumpyEncoder())
         if conf:
             return _wl, _wr, out, confs, info
         else:
@@ -2589,99 +2606,99 @@ class Stack(Spectra):
                                     conf_dict=conf_dict,
                                     inspect=inspect, path=path)
         ss = []
-        for i in range(len(fluxr_dict)):
-            ratios = np.array([fluxr_dict[i][key] for key in fluxr_dict[i]])
-            specnames = np.array([key for key in fluxr_dict[i]], dtype=object)
 
-            good = [np.where((self[s].wave > line - dw) & (self[s].wave < line + dw))[0] for s in specnames]
-            amps = np.zeros(specnames.size)
-            amps_dict = {}
-            for j, s in enumerate(specnames):
-                if good[j].size > 1:
-                    f = np.nanmax(self[s].flux[good[j]]) - 1
-                    amps[j] = f
-                    amps_dict[s] = f
-                else:
-                    amps_dict[s] = 0.
+        ratios = np.array([fluxr_dict[key] for key in fluxr_dict])
+        specnames = np.array([key for key in fluxr_dict], dtype=object)
 
-            if title_text_conf:
-                confidences = np.array([self[sn].data[title_text_conf] for sn in specnames])
-            # ind = ratios.argsort()[-5:][::-1]
-            w = np.where(ratios >= ratio_target)[0]
-            print(len(w), f' galaxies fulfill the threshold of {ratio_target}:')
-            print(specnames[w])
-            if agn_diagnostics:
-                kew = np.array([self[i].data['agn_class'] for i in specnames])
-                kw = np.where((kew is False) & (ratios >= ratio_target))[0]
-                print(f'Of these, {len(kw)} did NOT satisfy the Kewley et al. 2001 criteria: ')
-                print(specnames[kw])
-            ss.append(specnames[w])
-            if title_text_snr:
-                snrs = np.array([self[si].data[title_text_snr] for si in specnames])
-            tt = {s: r'$\mathcal{F}=%.3f$' % r for s, r in zip(specnames, ratios)} if not title_text_conf else \
-                {s: r'$\mathcal{F}=%.3f$; $conf=%.3f$' % (r, c) for s, r, c in
-                 zip(specnames, ratios, confidences)} if not title_text_snr else \
-                    {s: r'$\mathcal{F}=%.3f$; $conf=%.3f$; $SNR=%.3f$, $A*SNR=%.3f$' % (r, c, snr, a * snr) for
-                     s, r, c, snr, a in zip(specnames, ratios, confidences, snrs, amps)}
-            if title_text_conf:
-                tp = np.where((ratios >= ratio_target) & (confidences >= conf_target))[0]
-                fp = np.where((ratios >= ratio_target) & (confidences < conf_target))[0]
-                tn = np.where((ratios < ratio_target) & (confidences < conf_target))[0]
-                fn = np.where((ratios < ratio_target) & (confidences >= conf_target))[0]
-                ntp = len(tp)
-                nfp = len(fp)
-                ntn = len(tn)
-                nfn = len(fn)
-                tpsnr = np.nanmedian([self[ispec].data[title_text_snr] for ispec in specnames[tp]])
-                fpsnr = np.nanmedian([self[ispec].data[title_text_snr] for ispec in specnames[fp]])
-                tnsnr = np.nanmedian([self[ispec].data[title_text_snr] for ispec in specnames[tn]])
-                fnsnr = np.nanmedian([self[ispec].data[title_text_snr] for ispec in specnames[fn]])
-                tpasnr = np.nanmedian([self[ispec].data[title_text_snr] * amps_dict[ispec] for ispec in specnames[tp]])
-                fpasnr = np.nanmedian([self[ispec].data[title_text_snr] * amps_dict[ispec] for ispec in specnames[fp]])
-                tnasnr = np.nanmedian([self[ispec].data[title_text_snr] * amps_dict[ispec] for ispec in specnames[tn]])
-                fnasnr = np.nanmedian([self[ispec].data[title_text_snr] * amps_dict[ispec] for ispec in specnames[fn]])
-                with open(os.path.join(path, 'report_' + str(line) + '_' + tag + '.txt'), 'w') as file:
-                    file.write('tp: ' + str(ntp) + ', med SNR: ' + str(tpsnr) + ', med A*SNR: ' + str(tpasnr) + '\n')
-                    file.write('fp: ' + str(nfp) + ', med SNR: ' + str(fpsnr) + ', med A*SNR: ' + str(fpasnr) + '\n')
-                    file.write('tn: ' + str(ntn) + ', med SNR: ' + str(tnsnr) + ', med A*SNR: ' + str(tnasnr) + '\n')
-                    file.write('fn: ' + str(nfn) + ', med SNR: ' + str(fnsnr) + ', med A*SNR: ' + str(fnasnr) + '\n')
+        good = [np.where((self[s].wave > line - dw) & (self[s].wave < line + dw))[0] for s in specnames]
+        amps = np.zeros(specnames.size)
+        amps_dict = {}
+        for j, s in enumerate(specnames):
+            if good[j].size > 1:
+                f = np.nanmax(self[s].flux[good[j]]) - 1
+                amps[j] = f
+                amps_dict[s] = f
             else:
-                with open(os.path.join(path, 'report_' + str(line) + '_' + tag + '.txt'), 'w') as file:
-                    file.write('number integrated: ' + str(len(specnames)) + '\n')
-                    file.write('detections: ' + str(len(specnames[w])) + '\n')
-                    file.write('non-detections: ' + str(len(specnames) - len(specnames[w])) + '\n')
-            if plot_spec != 'none':
-                if plot_spec == 'sorted':
-                    if conf_dict is not None:
-                        tp = np.where((ratios >= ratio_target) & (confidences >= conf_target))[0]
-                        fp = np.where((ratios >= ratio_target) & (confidences < conf_target))[0]
-                        tn = np.where((ratios < ratio_target) & (confidences < conf_target))[0]
-                        fn = np.where((ratios < ratio_target) & (confidences >= conf_target))[0]
-                        name_list = [specnames[tp], specnames[fp], specnames[tn], specnames[fn]]
-                        ratio_list = [ratios[tp], ratios[fp], ratios[tn], ratios[fn]]
-                        path_list = ['true_positives_' + str(line), 'false_positives+' + str(line),
-                                     'true_negatives_' + str(line), 'false_negatives_' + str(line)]
-                    else:
-                        nw = np.where(ratios < ratio_target)[0]
-                        name_list = [specnames[w], specnames[nw]]
-                        ratio_list = [ratios[w], ratios[nw]]
-                        path_list = ['detections', 'non-detections']
-                elif plot_spec == 'all':
-                    name_list = [specnames]
-                    ratio_list = [ratios]
-                    path_list = ['spectra_' + str(line)]
-                elif plot_spec == 'detections':
-                    name_list = [specnames[w]]
-                    ratio_list = [ratios[w]]
-                    path_list = ['detections_' + str(line)]
+                amps_dict[s] = 0.
+
+        if title_text_conf:
+            confidences = np.array([self[sn].data[title_text_conf] for sn in specnames])
+        # ind = ratios.argsort()[-5:][::-1]
+        w = np.where(ratios >= ratio_target)[0]
+        print(len(w), f' galaxies fulfill the threshold of {ratio_target}:')
+        print(specnames[w])
+        if agn_diagnostics:
+            kew = np.array([self[i].data['agn_class'] for i in specnames])
+            kw = np.where((kew is False) & (ratios >= ratio_target))[0]
+            print(f'Of these, {len(kw)} did NOT satisfy the Kewley et al. 2001 criteria: ')
+            print(specnames[kw])
+        ss.append(specnames[w])
+        if title_text_snr:
+            snrs = np.array([self[si].data[title_text_snr] for si in specnames])
+        tt = {s: r'$\mathcal{F}=%.3f$' % r for s, r in zip(specnames, ratios)} if not title_text_conf else \
+            {s: r'$\mathcal{F}=%.3f$; $conf=%.3f$' % (r, c) for s, r, c in
+             zip(specnames, ratios, confidences)} if not title_text_snr else \
+                {s: r'$\mathcal{F}=%.3f$; $conf=%.3f$; $SNR=%.3f$, $A*SNR=%.3f$' % (r, c, snr, a * snr) for
+                 s, r, c, snr, a in zip(specnames, ratios, confidences, snrs, amps)}
+        if title_text_conf:
+            tp = np.where((ratios >= ratio_target) & (confidences >= conf_target))[0]
+            fp = np.where((ratios >= ratio_target) & (confidences < conf_target))[0]
+            tn = np.where((ratios < ratio_target) & (confidences < conf_target))[0]
+            fn = np.where((ratios < ratio_target) & (confidences >= conf_target))[0]
+            ntp = len(tp)
+            nfp = len(fp)
+            ntn = len(tn)
+            nfn = len(fn)
+            tpsnr = np.nanmedian([self[ispec].data[title_text_snr] for ispec in specnames[tp]])
+            fpsnr = np.nanmedian([self[ispec].data[title_text_snr] for ispec in specnames[fp]])
+            tnsnr = np.nanmedian([self[ispec].data[title_text_snr] for ispec in specnames[tn]])
+            fnsnr = np.nanmedian([self[ispec].data[title_text_snr] for ispec in specnames[fn]])
+            tpasnr = np.nanmedian([self[ispec].data[title_text_snr] * amps_dict[ispec] for ispec in specnames[tp]])
+            fpasnr = np.nanmedian([self[ispec].data[title_text_snr] * amps_dict[ispec] for ispec in specnames[fp]])
+            tnasnr = np.nanmedian([self[ispec].data[title_text_snr] * amps_dict[ispec] for ispec in specnames[tn]])
+            fnasnr = np.nanmedian([self[ispec].data[title_text_snr] * amps_dict[ispec] for ispec in specnames[fn]])
+            with open(os.path.join(path, 'report_' + str(line) + '_' + tag + '.txt'), 'w') as file:
+                file.write('tp: ' + str(ntp) + ', med SNR: ' + str(tpsnr) + ', med A*SNR: ' + str(tpasnr) + '\n')
+                file.write('fp: ' + str(nfp) + ', med SNR: ' + str(fpsnr) + ', med A*SNR: ' + str(fpasnr) + '\n')
+                file.write('tn: ' + str(ntn) + ', med SNR: ' + str(tnsnr) + ', med A*SNR: ' + str(tnasnr) + '\n')
+                file.write('fn: ' + str(nfn) + ', med SNR: ' + str(fnsnr) + ', med A*SNR: ' + str(fnasnr) + '\n')
+        else:
+            with open(os.path.join(path, 'report_' + str(line) + '_' + tag + '.txt'), 'w') as file:
+                file.write('number integrated: ' + str(len(specnames)) + '\n')
+                file.write('detections: ' + str(len(specnames[w])) + '\n')
+                file.write('non-detections: ' + str(len(specnames) - len(specnames[w])) + '\n')
+        if plot_spec != 'none':
+            if plot_spec == 'sorted':
+                if conf_dict is not None:
+                    tp = np.where((ratios >= ratio_target) & (confidences >= conf_target))[0]
+                    fp = np.where((ratios >= ratio_target) & (confidences < conf_target))[0]
+                    tn = np.where((ratios < ratio_target) & (confidences < conf_target))[0]
+                    fn = np.where((ratios < ratio_target) & (confidences >= conf_target))[0]
+                    name_list = [specnames[tp], specnames[fp], specnames[tn], specnames[fn]]
+                    ratio_list = [ratios[tp], ratios[fp], ratios[tn], ratios[fn]]
+                    path_list = ['true_positives_' + str(line), 'false_positives+' + str(line),
+                                 'true_negatives_' + str(line), 'false_negatives_' + str(line)]
                 else:
-                    raise ValueError('invalid plot_spec option')
-                for names, rts, pathi in zip(name_list, ratio_list, path_list):
-                    shade = [(line - dw, line + dw), (line - norm_dw[0] - dw, line - norm_dw[0] + dw),
-                             (line + norm_dw[1] - dw, line + norm_dw[1] + dw)]
-                    self.plot_spectra(os.path.join(path, pathi), names, _range=plot_range, ylim=ylim,
-                                      backend=plot_backend,
-                                      title_text=tt, f=None, shade_reg=shade)
+                    nw = np.where(ratios < ratio_target)[0]
+                    name_list = [specnames[w], specnames[nw]]
+                    ratio_list = [ratios[w], ratios[nw]]
+                    path_list = ['detections', 'non-detections']
+            elif plot_spec == 'all':
+                name_list = [specnames]
+                ratio_list = [ratios]
+                path_list = ['spectra_' + str(line)]
+            elif plot_spec == 'detections':
+                name_list = [specnames[w]]
+                ratio_list = [ratios[w]]
+                path_list = ['detections_' + str(line)]
+            else:
+                raise ValueError('invalid plot_spec option')
+            for names, rts, pathi in zip(name_list, ratio_list, path_list):
+                shade = [(line - dw, line + dw), (line - norm_dw[0] - dw, line - norm_dw[0] + dw),
+                         (line + norm_dw[1] - dw, line + norm_dw[1] + dw)]
+                self.plot_spectra(os.path.join(path, pathi), names, _range=plot_range, ylim=ylim,
+                                  backend=plot_backend,
+                                  title_text=tt, f=None, shade_reg=shade)
         return ss
 
     def _line_flux_diagnostics(self, fluxr_dict, line=6374, dw=5, title_text_snr=None, plot_backend='pyplot',
@@ -2689,291 +2706,345 @@ class Stack(Spectra):
                                inspect=None, path=''):
         # 10^-17 erg s^-1 cm^-2 (not per angstrom after integration)
         # Get data
-        # lengths = [len(fluxr_dict[fi]) for fi in fluxr_dict]
-        ratios = []
-        specnames = []
-        # stack_fluxes = []
-        amps = []
-        snrs = []
-        inspections = []
-        for i in range(len(fluxr_dict)):
-            ratios.append(np.array([fluxr_dict[i][fi] for fi in fluxr_dict[i]]))
-            specnames.append(np.array([fi for fi in fluxr_dict[i]]))
-
-            good = [np.where((self[s].wave > line - dw) & (self[s].wave < line + dw))[0] for s in specnames[i]]
-            ampi_temp = np.zeros(specnames[i].size)
-            for j, s in enumerate(specnames[i]):
-                if good[j].size > 1:
-                    ampi_temp[j] = np.nanmax(self[s].flux[good[j]]) - 1
-            amps.append(ampi_temp)
-
-            if inspect:
-                inspections.append(np.array([self[si].data[inspect] for si in specnames[i]]))
-            if title_text_snr:
-                snrs.append(np.array([self[si].data[title_text_snr] for si in specnames[i]]))
-            # stack_fluxes.append(fluxr_dict[i]['stack'][0])
+        ratios = np.array(list(fluxr_dict.values()))
+        specnames = np.array(list(fluxr_dict.keys()))
+        good = [np.where((self[s].wave > line - dw) & (self[s].wave < line + dw))[0] for s in specnames]
+        amps = np.zeros(specnames.size)
+        for j, s in enumerate(specnames):
+            if good[j].size > 1:
+                amps[j] = np.nanmax(self[s].flux[good[j]]) - 1
+        inspections = None
+        if inspect:
+            inspections = np.array([self[si].data[inspect] for si in specnames])
+        snrs = None
+        if title_text_snr:
+            snrs = np.array([self[si].data[title_text_snr] for si in specnames])
+        # stack_fluxes.append(fluxr_dict[i]['stack'][0])
 
         # Get mins/maxes
         # lstr = len(list(fluxr_dict[0].keys())[0])
-        mins = np.full((2, len(fluxr_dict)), fill_value='', dtype=object)
-        maxs = np.full_like(mins, fill_value='', dtype=object)
-        minr = np.full((2, len(fluxr_dict)), fill_value=np.nan, dtype=float)
-        maxr = np.full_like(minr, fill_value=np.nan, dtype=float)
-        for j in range(len(fluxr_dict)):
-            minrind = np.nanargmin(ratios[j])
-            min2rind = np.nanargmin(np.delete(ratios[j], minrind))
-            maxrind = np.nanargmax(ratios[j])
-            max2rind = np.nanargmax(np.delete(ratios[j], maxrind))
-            maxr[:, j] = (ratios[j][maxrind], np.delete(ratios[j], maxrind)[max2rind])
-            minr[:, j] = (ratios[j][minrind], np.delete(ratios[j], minrind)[min2rind])
-            maxs[:, j] = (specnames[j][maxrind], np.delete(specnames[j], maxrind)[max2rind])
-            mins[:, j] = (specnames[j][minrind], np.delete(specnames[j], minrind)[min2rind])
+
+        # for j in range(len(fluxr_dict)):
+        minrind = np.nanargmin(ratios)
+        min2rind = np.nanargmin(np.delete(ratios, minrind))
+        maxrind = np.nanargmax(ratios)
+        max2rind = np.nanargmax(np.delete(ratios, maxrind))
+        maxr = (ratios[maxrind], np.delete(ratios, maxrind)[max2rind])
+        minr = (ratios[minrind], np.delete(ratios, minrind)[min2rind])
+        maxs = (specnames[maxrind], np.delete(specnames, maxrind)[max2rind])
+        mins = (specnames[minrind], np.delete(specnames, minrind)[min2rind])
 
         reg = (line - dw * 2, line + dw * 2)
         if plot_backend == 'pyplot':
             # Set up a gridspec
-            for k in range(len(fluxr_dict)):
-                fig = plt.figure(constrained_layout=True)
-                gs = fig.add_gridspec(3, 3)
-                # Main flux ratio plot
-                ratioplot = fig.add_subplot(gs[0:2, 0:2])
-                ratioplot.hist(ratios[k], bins=np.arange(0, 3.2, 0.2), density=False)
-                ratioplot.set_yscale('log')
-                ratioplot.set_xlabel('Line flux / Stacked line flux')
-                ratioplot.set_ylabel('Number in bin')
-                # ratioplot.set_title('Stacked line flux $= %.3f' % stack_fluxes[k])
-                # ratioplot.set_ylim(0, 3)
+            fig = plt.figure(constrained_layout=True)
+            gs = fig.add_gridspec(3, 3)
+            # Main flux ratio plot
+            ratioplot = fig.add_subplot(gs[0:2, 0:2])
+            ratioplot.hist(ratios, bins=np.arange(0, 3.2, 0.2), density=False)
+            ratioplot.set_yscale('log')
+            ratioplot.set_xlabel('Line flux / Stacked line flux')
+            ratioplot.set_ylabel('Number in bin')
+            # ratioplot.set_title('Stacked line flux $= %.3f' % stack_fluxes[k])
+            # ratioplot.set_ylim(0, 3)
 
-                small = []
-                big = []
-                for m in range(2):
-                    # 2 smallest line ratios' profiles
-                    good1 = np.where((reg[0] < self[mins[m, k]].wave) & (self[mins[m, k]].wave < reg[1]))[0]
-                    small1 = fig.add_subplot(gs[2, m])
-                    small1.plot(self[mins[m, k]].wave[good1], self[mins[m, k]].flux[good1], 'k-')
-                    small1.fill_between(self[mins[m, k]].wave[good1],
-                                        self[mins[m, k]].flux[good1] - self[mins[m, k]].error[good1],
-                                        self[mins[m, k]].flux[good1] + self[mins[m, k]].error[good1],
-                                        color='mediumaquamarine', alpha=0.5)
-                    small1.axvline(line, linestyle='--', color='k')
-                    small1.axvspan(line - dw, line + dw, color='slategrey', alpha=0.5)
-                    ttl = mins[m, k] if len(mins[m, k]) <= 10 else mins[m, k][0:10] + '...'
-                    small1.set_title(ttl)
-                    small1.set_xticks([line - dw, line + dw])
-                    if m == 0:
-                        small1.set_ylabel('Norm. Flux')
-                    elif m == 1:
-                        small1.set_xlabel('Wavelength [${\\rm \\AA}$]')
-                    small.append(small1)
-                    # 2 largest line ratios' profiles
-                    good2 = np.where((reg[0] < self[maxs[m, k]].wave) & (self[maxs[m, k]].wave < reg[1]))[0]
-                    big1 = fig.add_subplot(gs[m, 2])
-                    big1.plot(self[maxs[m, k]].wave[good2], self[maxs[m, k]].flux[good2], 'k-')
-                    big1.fill_between(self[maxs[m, k]].wave[good2],
-                                      self[maxs[m, k]].flux[good2] - self[maxs[m, k]].error[good2],
-                                      self[maxs[m, k]].flux[good2] + self[maxs[m, k]].error[good2],
-                                      color='mediumaquamarine', alpha=0.5)
-                    big1.axvline(line, linestyle='--', color='k')
-                    big1.axvspan(line - dw, line + dw, color='slategrey', alpha=0.5)
-                    ttl = maxs[m, k] if len(maxs[m, k]) <= 10 else maxs[m, k][0:10] + '...'
-                    big1.set_title(ttl)
-                    big1.set_xticks([line - dw, line + dw])
-                    big.append(big1)
+            small = []
+            big = []
+            for m in range(2):
+                # 2 smallest line ratios' profiles
+                good1 = np.where((reg[0] < self[mins[m]].wave) & (self[mins[m]].wave < reg[1]))[0]
+                small1 = fig.add_subplot(gs[2, m])
+                small1.plot(self[mins[m]].wave[good1], self[mins[m]].flux[good1], 'k-')
+                small1.fill_between(self[mins[m]].wave[good1],
+                                    self[mins[m]].flux[good1] - self[mins[m]].error[good1],
+                                    self[mins[m]].flux[good1] + self[mins[m]].error[good1],
+                                    color='mediumaquamarine', alpha=0.5)
+                small1.axvline(line, linestyle='--', color='k')
+                small1.axvspan(line - dw, line + dw, color='slategrey', alpha=0.5)
+                ttl = mins[m] if len(mins[m]) <= 10 else mins[m][0:10] + '...'
+                small1.set_title(ttl)
+                small1.set_xticks([line - dw, line + dw])
+                if m == 0:
+                    small1.set_ylabel('Norm. Flux')
+                elif m == 1:
+                    small1.set_xlabel('Wavelength [${\\rm \\AA}$]')
+                small.append(small1)
+                # 2 largest line ratios' profiles
+                good2 = np.where((reg[0] < self[maxs[m]].wave) & (self[maxs[m]].wave < reg[1]))[0]
+                big1 = fig.add_subplot(gs[m, 2])
+                big1.plot(self[maxs[m]].wave[good2], self[maxs[m]].flux[good2], 'k-')
+                big1.fill_between(self[maxs[m]].wave[good2],
+                                  self[maxs[m]].flux[good2] - self[maxs[m]].error[good2],
+                                  self[maxs[m]].flux[good2] + self[maxs[m]].error[good2],
+                                  color='mediumaquamarine', alpha=0.5)
+                big1.axvline(line, linestyle='--', color='k')
+                big1.axvspan(line - dw, line + dw, color='slategrey', alpha=0.5)
+                ttl = maxs[m] if len(maxs[m]) <= 10 else maxs[m][0:10] + '...'
+                big1.set_title(ttl)
+                big1.set_xticks([line - dw, line + dw])
+                big.append(big1)
 
-                # Stack line profile
-                # stack = fig.add_subplot(gs[2, 2])
-                # good = np.where((reg[0] < self.universal_grid[k]) & (self.universal_grid[k] < reg[1]))[0]
-                # stack.plot(self.universal_grid[k][good], self.stacked_flux[k][good], 'k-')
-                # stack.fill_between(self.universal_grid[k][good],
-                #                    self.stacked_flux[k][good]-self.stacked_err[k][good],
-                #                    self.stacked_flux[k][good]+self.stacked_err[k][good],
-                #                    color='mediumaquamarine', alpha=0.5)
-                # stack.axvline(line, linestyle='--', color='k')
-                # stack.axvspan(line-dw, line+dw, color='slategrey', alpha=0.5)
-                # stack.set_xticks([line-dw, line+dw])
+            # Stack line profile
+            # stack = fig.add_subplot(gs[2, 2])
+            # good = np.where((reg[0] < self.universal_grid[k]) & (self.universal_grid[k] < reg[1]))[0]
+            # stack.plot(self.universal_grid[k][good], self.stacked_flux[k][good], 'k-')
+            # stack.fill_between(self.universal_grid[k][good],
+            #                    self.stacked_flux[k][good]-self.stacked_err[k][good],
+            #                    self.stacked_flux[k][good]+self.stacked_err[k][good],
+            #                    color='mediumaquamarine', alpha=0.5)
+            # stack.axvline(line, linestyle='--', color='k')
+            # stack.axvspan(line-dw, line+dw, color='slategrey', alpha=0.5)
+            # stack.set_xticks([line-dw, line+dw])
 
-                # Axis sharing
-                big[0].sharex(big[1])
-                # stack.sharex(big[0])
-                small[0].sharex(big[0])
-                small[1].sharex(small[0])
-                big[0].sharey(big[1])
-                # stack.sharey(big[0])
-                small[0].sharey(big[0])
-                small[1].sharey(small[0])
+            # Axis sharing
+            big[0].sharex(big[1])
+            # stack.sharex(big[0])
+            small[0].sharex(big[0])
+            small[1].sharex(small[0])
+            big[0].sharey(big[1])
+            # stack.sharey(big[0])
+            small[0].sharey(big[0])
+            small[1].sharey(small[0])
 
-                # stack.set_title('Stack')
-                fig.savefig(path + os.sep + 'line_flux_ratios_' + str(k) + '.pdf', dpi=300)
-                plt.close()
+            # stack.set_title('Stack')
+            fig.savefig(path + os.sep + 'line_flux_ratios.pdf', dpi=300)
+            plt.close()
 
             if conf_dict:
-                confidences = []
 
-                for k in range(len(fluxr_dict)):
-                    confidences.append(np.array([conf_dict[k][fi] for fi in conf_dict[k] if fi != 'stack']))
+                confidences = np.array([conf_dict[fi] for fi in conf_dict if fi != 'stack'])
 
-                    # Sort
-                    isort = np.argsort(confidences[k])
-                    confidences[k] = confidences[k][isort]
-                    ratios[k] = ratios[k][isort]
-                    amps[k] = amps[k][isort]
-                    snrs[k] = snrs[k][isort]
-                    asnr = amps[k] * snrs[k]
-                    if inspect:
-                        inspections[k] = inspections[k][isort]
+                # Sort
+                isort = np.argsort(confidences)
+                confidences = confidences[isort]
+                ratios = ratios[isort]
+                amps = amps[isort]
+                snrs = snrs[isort]
+                asnr = amps * snrs
+                if inspect:
+                    inspections = inspections[isort]
 
-                    std = np.nanstd(ratios[k])
-                    median = np.nanmedian(ratios[k])
-                    good = np.where((np.abs(ratios[k] - median) < 3 * std) & (
-                            np.isfinite(confidences[k]) & np.isfinite(ratios[k])))[0]
-                    ratios[k] = ratios[k][good]
-                    confidences[k] = confidences[k][good]
-                    asnr = asnr[good]
+                std = np.nanstd(ratios)
+                median = np.nanmedian(ratios)
+                good = np.where((np.abs(ratios - median) < 3 * std) & (
+                        np.isfinite(confidences) & np.isfinite(ratios)))[0]
+                ratios = ratios[good]
+                confidences = confidences[good]
+                asnr = asnr[good]
 
-                    # ntop = int(.2*len(ratios[k]))
-                    # rsort = np.argsort(ratios[k])
-                    # top20 = ratios[k][rsort][len(ratios[k])-ntop:]
-                    # top20c = confidences[k][rsort][len(ratios[k])-ntop:]
+                # ntop = int(.2*len(ratios[k]))
+                # rsort = np.argsort(ratios[k])
+                # top20 = ratios[k][rsort][len(ratios[k])-ntop:]
+                # top20c = confidences[k][rsort][len(ratios[k])-ntop:]
 
-                    A = np.vstack((confidences[k], np.ones_like(confidences[k]))).T
-                    m, c = np.linalg.lstsq(A, ratios[k], rcond=None)[0]
-                    x_model = np.linspace(confidences[k][0], confidences[k][-1], 1000)
-                    y_model = m * x_model + c
+                A = np.vstack((confidences, np.ones_like(confidences))).T
+                m, c = np.linalg.lstsq(A, ratios, rcond=None)[0]
+                x_model = np.linspace(confidences[0], confidences[-1], 1000)
+                y_model = m * x_model + c
 
-                    fig, ax = plt.subplots()
-                    dataplot = ax.plot(confidences[k], ratios[k], '.', color=asnr if not inspect else inspections[k],
-                                       cmap='winter')
-                    fig.colorbar(dataplot, ax=ax, label='$A*SNR$' if not inspect else 'Inspections')
-                    # ax.plot(top20c, top20, '.', color='cyan', label='Top 20%')
-                    ax.plot(x_model, y_model, 'k--')
-                    ax.legend()
-                    ax.set_title(r'Linear Least Squares Fit: $m=%.3f$, $b=%.3f$' % (m, c))
-                    ax.set_xlabel('Confidence Level')
-                    ax.set_ylabel(r'Line Flux Ratio Parameter $\mathcal{F}$')
-                    # ax.set_ylim(-10, 10)
-                    fig.savefig(path + os.sep + 'line_flux_confidence_covar_' + str(k) + '.pdf', dpi=300)
-                    plt.close()
+                fig, ax = plt.subplots()
+                dataplot = ax.plot(confidences, ratios, '.', color=asnr if not inspect else inspections,
+                                   cmap='winter')
+                fig.colorbar(dataplot, ax=ax, label='$A*SNR$' if not inspect else 'Inspections')
+                # ax.plot(top20c, top20, '.', color='cyan', label='Top 20%')
+                ax.plot(x_model, y_model, 'k--')
+                ax.legend()
+                ax.set_title(r'Linear Least Squares Fit: $m=%.3f$, $b=%.3f$' % (m, c))
+                ax.set_xlabel('Confidence Level')
+                ax.set_ylabel(r'Line Flux Ratio Parameter $\mathcal{F}$')
+                # ax.set_ylim(-10, 10)
+                fig.savefig(path + os.sep + 'line_flux_confidence_covar.pdf', dpi=300)
+                plt.close()
 
         elif plot_backend == 'plotly':
-            for k in range(len(fluxr_dict)):
-                ttl1 = maxs[0, k] if len(maxs[0, k]) <= 10 else maxs[0, k][0:10] + '...'
-                ttl2 = maxs[1, k] if len(maxs[1, k]) <= 10 else maxs[1, k][0:10] + '...'
-                ttl3 = mins[0, k] if len(mins[0, k]) <= 10 else mins[0, k][0:10] + '...'
-                ttl4 = mins[1, k] if len(mins[1, k]) <= 10 else mins[1, k][0:10] + '...'
-                fig = plotly.subplots.make_subplots(rows=3, cols=3,
-                                                    specs=[[{"rowspan": 2, "colspan": 2}, None, {}],
-                                                           [None, None, {}],
-                                                           [{}, {}, {}]],
-                                                    subplot_titles=['',
-                                                                    ttl1, ttl2, ttl3, ttl4, 'Stack'])
-                fig.add_trace(plotly.graph_objects.Histogram(x=ratios[k], xbins=dict(start=0, end=max(ratios[k]),
-                                                                                     size=max(ratios[k])/10)), row=1,
-                              col=1)
-                fig.update_traces(marker_color='rgb(158,202,225)', marker_line_color='rgb(8,48,107)',
-                                  marker_line_width=0.0, opacity=0.8, row=1, col=1)
-                fig.update_layout(
-                    yaxis=dict(type='log'),
-                    yaxis_title_text='Number in bin',
-                    xaxis_title_text='Line flux / stacked line flux',
-                    template='plotly_white'
-                    # title_text='Stacked line flux $= %.3f \\times 10^{-17}$ erg s$^{-1}$ cm$^{-2}$' % stack_fluxes[k],
-                )
-                linewidth = .5
-                maxy = -9999
-                miny = 9999
-                for m in range(2):
-                    good1 = np.where((reg[0] < self[mins[m, k]].wave) & (self[mins[m, k]].wave < reg[1]) &
-                                     np.isfinite(self[mins[m, k]].flux) & np.isfinite(self[mins[m, k]].error))[0]
-                    fig.add_trace(
-                        plotly.graph_objects.Scatter(x=self[mins[m, k]].wave[good1], y=self[mins[m, k]].flux[good1],
-                                                     line=dict(color='black', width=linewidth),
-                                                     name='Data', showlegend=False), row=3, col=m + 1)
-                    fig.add_trace(plotly.graph_objects.Scatter(x=self[mins[m, k]].wave[good1],
-                                                               y=self[mins[m, k]].flux[good1] + self[mins[m, k]].error[
-                                                                   good1],
-                                                               line=dict(color='#60dbbd', width=0),
-                                                               fillcolor='rgba(96, 219, 189, 0.6)',
-                                                               name='Upper Bound', showlegend=False), row=3, col=m + 1)
-                    fig.add_trace(plotly.graph_objects.Scatter(x=self[mins[m, k]].wave[good1],
-                                                               y=self[mins[m, k]].flux[good1] - self[mins[m, k]].error[
-                                                                   good1],
-                                                               line=dict(color='#60dbbd', width=0),
-                                                               fillcolor='rgba(96, 219, 189, 0.6)',
-                                                               fill='tonexty', name='Lower Bound', showlegend=False),
-                                  row=3, col=m + 1)
-                    fig.add_vline(x=line, line_width=2 * linewidth, line_dash='dot', line_color='#226666', row=3,
-                                  col=m + 1)
-                    n = m + 4
-                    fig['layout']['xaxis' + str(n)]['tickmode'] = 'array'
-                    fig['layout']['xaxis' + str(n)]['tickvals'] = [line - dw, line + dw]
-                    # fig['layout']['title'+str(n)]['text'] = mins[m, k]
-                    if m == 0:
-                        fig['layout']['yaxis' + str(n)]['title_text'] = 'Norm. Flux'
-                    elif m == 1:
-                        fig['layout']['xaxis' + str(n)]['title_text'] = 'Wavelength [&#8491;]'
-                    maxiy = np.nanmax(self[mins[m, k]].flux[good1]) + .5
-                    miniy = np.nanmin(self[mins[m, k]].flux[good1]) - .5
-                    if maxiy > maxy:
-                        maxy = maxiy
-                    if miniy < miny:
-                        miny = miniy
-                    good2 = np.where((reg[0] < self[maxs[m, k]].wave) & (self[maxs[m, k]].wave < reg[1]))[0]
-                    fig.add_trace(
-                        plotly.graph_objects.Scatter(x=self[maxs[m, k]].wave[good2], y=self[maxs[m, k]].flux[good2],
-                                                     line=dict(color='black', width=linewidth),
-                                                     name='Data', showlegend=False), row=m + 1, col=3)
-                    fig.add_trace(plotly.graph_objects.Scatter(x=self[maxs[m, k]].wave[good2],
-                                                               y=self[maxs[m, k]].flux[good2] + self[maxs[m, k]].error[
-                                                                   good2],
-                                                               line=dict(color='#60dbbd', width=0),
-                                                               fillcolor='rgba(96, 219, 189, 0.6)',
-                                                               name='Upper Bound', showlegend=False), row=m + 1, col=3)
-                    fig.add_trace(plotly.graph_objects.Scatter(x=self[maxs[m, k]].wave[good2],
-                                                               y=self[maxs[m, k]].flux[good2] - self[maxs[m, k]].error[
-                                                                   good2],
-                                                               line=dict(color='#60dbbd', width=0),
-                                                               fillcolor='rgba(96, 219, 189, 0.6)',
-                                                               fill='tonexty', name='Lower Bound', showlegend=False),
-                                  row=m + 1, col=3)
-                    fig.add_vline(x=line, line_width=2 * linewidth, line_dash='dot', line_color='#226666', row=m + 1,
-                                  col=3)
-                    n2 = m + 2
-                    fig['layout']['xaxis' + str(n2)]['tickmode'] = 'array'
-                    fig['layout']['xaxis' + str(n2)]['tickvals'] = [line - dw, line + dw]
-                    # fig['layout']['title'+str(n2)]['text'] = maxs[m, k]
-                    maxiy = np.nanmax(self[maxs[m, k]].flux[good2]) + .5
-                    miniy = np.nanmin(self[maxs[m, k]].flux[good2]) - .5
-                    if maxiy > maxy:
-                        maxy = maxiy
-                    if miniy < miny:
-                        miny = miniy
 
-                # good = np.where((reg[0] < self.universal_grid[k]) & (self.universal_grid[k] < reg[1]))[0]
-                # fig.add_trace(plotly.graph_objects.Scatter(x=self.universal_grid[k][good], y=self.stacked_flux[k][good],
-                #                                            line=dict(color='black', width=linewidth),
-                #                                            name='Data', showlegend=False), row=3, col=3)
-                # fig.add_trace(plotly.graph_objects.Scatter(x=self.universal_grid[k][good],
-                #                                            y=self.stacked_flux[k][good] + self.stacked_err[k][good],
-                #                                            line=dict(color='#60dbbd', width=0),
-                #                                            fillcolor='rgba(96, 219, 189, 0.6)',
-                #                                            name='Upper Bound', showlegend=False), row=3, col=3)
-                # fig.add_trace(plotly.graph_objects.Scatter(x=self.universal_grid[k][good],
-                #                                            y=self.stacked_flux[k][good] - self.stacked_err[k][good],
-                #                                            line=dict(color='#60dbbd', width=0),
-                #                                            fillcolor='rgba(96, 219, 189, 0.6)',
-                #                                            fill='tonexty', name='Lower Bound', showlegend=False), row=3, col=3)
-                # fig.add_vline(x=line, line_width=2 * linewidth, line_dash='dot', line_color='#226666', row=3, col=3)
-                # fig['layout']['text'+str(6)] = 'Stack'
-                fig['layout']['xaxis' + str(6)]['tickmode'] = 'array'
-                fig['layout']['xaxis' + str(6)]['tickvals'] = [line - dw, line + dw]
-                for i in range(2, 6):
-                    fig['layout']['yaxis' + str(i)]['range'] = (miny, maxy)
-                    fig['layout']['yaxis' + str(i)]['constrain'] = 'domain'
-                    fig['layout']['xaxis' + str(i)]['range'] = (line - 2 * dw, line + 2 * dw)
-                    fig['layout']['xaxis' + str(i)]['constrain'] = 'domain'
-                    fig.add_shape(type='rect', xref='x' + str(i), yref='y' + str(i), x0=line - dw, y0=miny,
-                                  x1=line + dw, y1=maxy, fillcolor='lightgrey', opacity=0.5,
-                                  line_width=0, layer='below')
+            ttl1 = maxs[0] if len(maxs[0]) <= 10 else maxs[0][0:10] + '...'
+            ttl2 = maxs[1] if len(maxs[1]) <= 10 else maxs[1][0:10] + '...'
+            ttl3 = mins[0] if len(mins[0]) <= 10 else mins[0][0:10] + '...'
+            ttl4 = mins[1] if len(mins[1]) <= 10 else mins[1][0:10] + '...'
+            fig = plotly.subplots.make_subplots(rows=3, cols=3,
+                                                specs=[[{"rowspan": 2, "colspan": 2}, None, {}],
+                                                       [None, None, {}],
+                                                       [{}, {}, {}]],
+                                                subplot_titles=['',
+                                                                ttl1, ttl2, ttl3, ttl4, 'Stack'])
+            fig.add_trace(plotly.graph_objects.Histogram(x=ratios, xbins=dict(start=0, end=max(ratios),
+                                                                                 size=max(ratios)/10)), row=1,
+                          col=1)
+            fig.update_traces(marker_color='rgb(158,202,225)', marker_line_color='rgb(8,48,107)',
+                              marker_line_width=0.0, opacity=0.8, row=1, col=1)
+            fig.update_layout(
+                yaxis=dict(type='log'),
+                yaxis_title_text='Number in bin',
+                xaxis_title_text='Line flux / stacked line flux',
+                template='plotly_white'
+                # title_text='Stacked line flux $= %.3f \\times 10^{-17}$ erg s$^{-1}$ cm$^{-2}$' % stack_fluxes[k],
+            )
+            linewidth = .5
+            maxy = -9999
+            miny = 9999
+            for m in range(2):
+                good1 = np.where((reg[0] < self[mins[m]].wave) & (self[mins[m]].wave < reg[1]) &
+                                 np.isfinite(self[mins[m]].flux) & np.isfinite(self[mins[m]].error))[0]
+                fig.add_trace(
+                    plotly.graph_objects.Scatter(x=self[mins[m]].wave[good1], y=self[mins[m]].flux[good1],
+                                                 line=dict(color='black', width=linewidth),
+                                                 name='Data', showlegend=False), row=3, col=m + 1)
+                fig.add_trace(plotly.graph_objects.Scatter(x=self[mins[m]].wave[good1],
+                                                           y=self[mins[m]].flux[good1] + self[mins[m]].error[
+                                                               good1],
+                                                           line=dict(color='#60dbbd', width=0),
+                                                           fillcolor='rgba(96, 219, 189, 0.6)',
+                                                           name='Upper Bound', showlegend=False), row=3, col=m + 1)
+                fig.add_trace(plotly.graph_objects.Scatter(x=self[mins[m]].wave[good1],
+                                                           y=self[mins[m]].flux[good1] - self[mins[m]].error[
+                                                               good1],
+                                                           line=dict(color='#60dbbd', width=0),
+                                                           fillcolor='rgba(96, 219, 189, 0.6)',
+                                                           fill='tonexty', name='Lower Bound', showlegend=False),
+                              row=3, col=m + 1)
+                fig.add_vline(x=line, line_width=2 * linewidth, line_dash='dot', line_color='#226666', row=3,
+                              col=m + 1)
+                n = m + 4
+                fig['layout']['xaxis' + str(n)]['tickmode'] = 'array'
+                fig['layout']['xaxis' + str(n)]['tickvals'] = [line - dw, line + dw]
+                # fig['layout']['title'+str(n)]['text'] = mins[m, k]
+                if m == 0:
+                    fig['layout']['yaxis' + str(n)]['title_text'] = 'Norm. Flux'
+                elif m == 1:
+                    fig['layout']['xaxis' + str(n)]['title_text'] = 'Wavelength [&#8491;]'
+                maxiy = np.nanmax(self[mins[m]].flux[good1]) + .5
+                miniy = np.nanmin(self[mins[m]].flux[good1]) - .5
+                if maxiy > maxy:
+                    maxy = maxiy
+                if miniy < miny:
+                    miny = miniy
+                good2 = np.where((reg[0] < self[maxs[m]].wave) & (self[maxs[m]].wave < reg[1]))[0]
+                fig.add_trace(
+                    plotly.graph_objects.Scatter(x=self[maxs[m]].wave[good2], y=self[maxs[m]].flux[good2],
+                                                 line=dict(color='black', width=linewidth),
+                                                 name='Data', showlegend=False), row=m + 1, col=3)
+                fig.add_trace(plotly.graph_objects.Scatter(x=self[maxs[m]].wave[good2],
+                                                           y=self[maxs[m]].flux[good2] + self[maxs[m]].error[
+                                                               good2],
+                                                           line=dict(color='#60dbbd', width=0),
+                                                           fillcolor='rgba(96, 219, 189, 0.6)',
+                                                           name='Upper Bound', showlegend=False), row=m + 1, col=3)
+                fig.add_trace(plotly.graph_objects.Scatter(x=self[maxs[m]].wave[good2],
+                                                           y=self[maxs[m]].flux[good2] - self[maxs[m]].error[
+                                                               good2],
+                                                           line=dict(color='#60dbbd', width=0),
+                                                           fillcolor='rgba(96, 219, 189, 0.6)',
+                                                           fill='tonexty', name='Lower Bound', showlegend=False),
+                              row=m + 1, col=3)
+                fig.add_vline(x=line, line_width=2 * linewidth, line_dash='dot', line_color='#226666', row=m + 1,
+                              col=3)
+                n2 = m + 2
+                fig['layout']['xaxis' + str(n2)]['tickmode'] = 'array'
+                fig['layout']['xaxis' + str(n2)]['tickvals'] = [line - dw, line + dw]
+                # fig['layout']['title'+str(n2)]['text'] = maxs[m, k]
+                maxiy = np.nanmax(self[maxs[m]].flux[good2]) + .5
+                miniy = np.nanmin(self[maxs[m]].flux[good2]) - .5
+                if maxiy > maxy:
+                    maxy = maxiy
+                if miniy < miny:
+                    miny = miniy
+
+            # good = np.where((reg[0] < self.universal_grid[k]) & (self.universal_grid[k] < reg[1]))[0]
+            # fig.add_trace(plotly.graph_objects.Scatter(x=self.universal_grid[k][good], y=self.stacked_flux[k][good],
+            #                                            line=dict(color='black', width=linewidth),
+            #                                            name='Data', showlegend=False), row=3, col=3)
+            # fig.add_trace(plotly.graph_objects.Scatter(x=self.universal_grid[k][good],
+            #                                            y=self.stacked_flux[k][good] + self.stacked_err[k][good],
+            #                                            line=dict(color='#60dbbd', width=0),
+            #                                            fillcolor='rgba(96, 219, 189, 0.6)',
+            #                                            name='Upper Bound', showlegend=False), row=3, col=3)
+            # fig.add_trace(plotly.graph_objects.Scatter(x=self.universal_grid[k][good],
+            #                                            y=self.stacked_flux[k][good] - self.stacked_err[k][good],
+            #                                            line=dict(color='#60dbbd', width=0),
+            #                                            fillcolor='rgba(96, 219, 189, 0.6)',
+            #                                            fill='tonexty', name='Lower Bound', showlegend=False), row=3, col=3)
+            # fig.add_vline(x=line, line_width=2 * linewidth, line_dash='dot', line_color='#226666', row=3, col=3)
+            # fig['layout']['text'+str(6)] = 'Stack'
+            fig['layout']['xaxis' + str(6)]['tickmode'] = 'array'
+            fig['layout']['xaxis' + str(6)]['tickvals'] = [line - dw, line + dw]
+            for i in range(2, 6):
+                fig['layout']['yaxis' + str(i)]['range'] = (miny, maxy)
+                fig['layout']['yaxis' + str(i)]['constrain'] = 'domain'
+                fig['layout']['xaxis' + str(i)]['range'] = (line - 2 * dw, line + 2 * dw)
+                fig['layout']['xaxis' + str(i)]['constrain'] = 'domain'
+                fig.add_shape(type='rect', xref='x' + str(i), yref='y' + str(i), x0=line - dw, y0=miny,
+                              x1=line + dw, y1=maxy, fillcolor='lightgrey', opacity=0.5,
+                              line_width=0, layer='below')
+
+            fig.update_layout(
+                font_family="Georgia, Times New Roman, Serif",
+                # font_color="blue",
+                title_font_family="Georgia, Times New Roman, Serif",
+                # title_font_color="red",
+                # legend_title_font_color="green"
+            )
+            fig.update_xaxes(title_font_family="Georgia, Times New Roman, Serif")
+            fig.update_yaxes(title_font_family="Georgia, Times New Roman, Serif")
+
+            fig.write_html(path + os.sep + 'line_flux_ratios.html', include_mathjax="cdn")
+            # fig.write_image(path + os.sep + 'line_flux_ratios_' + str(k) + '.pdf')
+
+            if conf_dict:
+
+                confidences = np.array([conf_dict[fi] for fi in conf_dict if fi != 'stack'])
+
+                # Sort
+                isort = np.argsort(confidences)
+                confidences = confidences[isort]
+                ratios = ratios[isort]
+                amps = amps[isort]
+                snrs = snrs[isort]
+                asnr = amps * snrs
+                if inspect:
+                    inspections = inspections[isort]
+
+                std = np.nanstd(ratios)
+                median = np.nanmedian(ratios)
+                good = np.where((np.abs(ratios - median) < 3 * std) & (
+                        np.isfinite(confidences) & np.isfinite(ratios)))[0]
+                ratios = ratios[good]
+                confidences = confidences[good]
+                asnr = asnr[good]
+
+                # ntop = int(.2 * len(ratios[k]))
+                # rsort = np.argsort(ratios[k])
+                # top20 = ratios[k][rsort][len(ratios[k]) - ntop:]
+                # top20c = confidences[k][rsort][len(ratios[k]) - ntop:]
+
+                A = np.vstack((confidences, np.ones_like(confidences))).T
+                m, c = np.linalg.lstsq(A, ratios, rcond=None)[0]
+                x_model = np.linspace(confidences[0], confidences[-1], 1000)
+                y_model = m * x_model + c
+
+                fig = plotly.subplots.make_subplots(rows=1, cols=1)
+                fig.add_trace(plotly.graph_objects.Scatter(
+                    x=confidences, y=ratios, mode='markers',
+                    marker=dict(size=4,
+                                color=asnr if not inspect else inspections,
+                                colorbar=dict(title="$A \\times SNR$" if not inspect else "Inspections"),
+                                colorscale="ice" if not inspect else "spectral",
+                                cmin=0 if not inspect else -1,
+                                cmax=4 if not inspect else 1),
+                    showlegend=False))
+                # fig.add_trace(plotly.graph_objects.Scatter(x=top20c, y=top20, mode='markers',
+                #     marker=dict(size=4, color='#48CADB'), showlegend=False))
+                fig.add_trace(plotly.graph_objects.Scatter(x=x_model, y=y_model,
+                                                           line=dict(color='black', width=.5, dash='dash'),
+                                                           showlegend=False))
+                fig.update_layout(
+                    template='plotly_white',
+                    title='Linear Least Squares Fit: m=%.3f, b=%.3f' % (m, c),
+                    xaxis_title='Confidence Level',
+                    yaxis_title='${\\rm Line Flux Ratio Parameter}\\ \\mathcal{F}$',
+                    # yaxis_range=(-10, 10),
+                    # yaxis_constrain='domain'
+                )
 
                 fig.update_layout(
                     font_family="Georgia, Times New Roman, Serif",
@@ -2985,80 +3056,9 @@ class Stack(Spectra):
                 fig.update_xaxes(title_font_family="Georgia, Times New Roman, Serif")
                 fig.update_yaxes(title_font_family="Georgia, Times New Roman, Serif")
 
-                fig.write_html(path + os.sep + 'line_flux_ratios_' + str(k) + '.html', include_mathjax="cdn")
-                # fig.write_image(path + os.sep + 'line_flux_ratios_' + str(k) + '.pdf')
-
-            if conf_dict:
-                confidences = []
-
-                for k in range(len(fluxr_dict)):
-                    confidences.append(np.array([conf_dict[k][fi] for fi in conf_dict[k] if fi != 'stack']))
-
-                    # Sort
-                    isort = np.argsort(confidences[k])
-                    confidences[k] = confidences[k][isort]
-                    ratios[k] = ratios[k][isort]
-                    amps[k] = amps[k][isort]
-                    snrs[k] = snrs[k][isort]
-                    asnr = amps[k] * snrs[k]
-                    if inspect:
-                        inspections[k] = inspections[k][isort]
-
-                    std = np.nanstd(ratios[k])
-                    median = np.nanmedian(ratios[k])
-                    good = np.where((np.abs(ratios[k] - median) < 3 * std) & (
-                            np.isfinite(confidences[k]) & np.isfinite(ratios[k])))[0]
-                    ratios[k] = ratios[k][good]
-                    confidences[k] = confidences[k][good]
-                    asnr = asnr[good]
-
-                    # ntop = int(.2 * len(ratios[k]))
-                    # rsort = np.argsort(ratios[k])
-                    # top20 = ratios[k][rsort][len(ratios[k]) - ntop:]
-                    # top20c = confidences[k][rsort][len(ratios[k]) - ntop:]
-
-                    A = np.vstack((confidences[k], np.ones_like(confidences[k]))).T
-                    m, c = np.linalg.lstsq(A, ratios[k], rcond=None)[0]
-                    x_model = np.linspace(confidences[k][0], confidences[k][-1], 1000)
-                    y_model = m * x_model + c
-
-                    fig = plotly.subplots.make_subplots(rows=1, cols=1)
-                    fig.add_trace(plotly.graph_objects.Scatter(
-                        x=confidences[k], y=ratios[k], mode='markers',
-                        marker=dict(size=4,
-                                    color=asnr if not inspect else inspections[k],
-                                    colorbar=dict(title="$A \\times SNR$" if not inspect else "Inspections"),
-                                    colorscale="ice" if not inspect else "spectral",
-                                    cmin=0 if not inspect else -1,
-                                    cmax=4 if not inspect else 1),
-                        showlegend=False))
-                    # fig.add_trace(plotly.graph_objects.Scatter(x=top20c, y=top20, mode='markers',
-                    #     marker=dict(size=4, color='#48CADB'), showlegend=False))
-                    fig.add_trace(plotly.graph_objects.Scatter(x=x_model, y=y_model,
-                                                               line=dict(color='black', width=.5, dash='dash'),
-                                                               showlegend=False))
-                    fig.update_layout(
-                        template='plotly_white',
-                        title='Linear Least Squares Fit: m=%.3f, b=%.3f' % (m, c),
-                        xaxis_title='Confidence Level',
-                        yaxis_title='${\\rm Line Flux Ratio Parameter}\\ \\mathcal{F}$',
-                        # yaxis_range=(-10, 10),
-                        # yaxis_constrain='domain'
-                    )
-
-                    fig.update_layout(
-                        font_family="Georgia, Times New Roman, Serif",
-                        # font_color="blue",
-                        title_font_family="Georgia, Times New Roman, Serif",
-                        # title_font_color="red",
-                        # legend_title_font_color="green"
-                    )
-                    fig.update_xaxes(title_font_family="Georgia, Times New Roman, Serif")
-                    fig.update_yaxes(title_font_family="Georgia, Times New Roman, Serif")
-
-                    fig.write_html(path + os.sep + 'line_flux_confidence_covar_' + str(k) + '.html',
-                                   include_mathjax="cdn")
-                    # fig.write_image(path + os.sep + 'line_flux_confidence_covar_' + str(k) + '.pdf')
+                fig.write_html(path + os.sep + 'line_flux_confidence_covar.html',
+                               include_mathjax="cdn")
+                # fig.write_image(path + os.sep + 'line_flux_confidence_covar_' + str(k) + '.pdf')
 
         else:
             raise NotImplementedError
@@ -3080,6 +3080,13 @@ class Stack(Spectra):
             serializable = serializable.__dict__
             serialized = json.dumps(serializable, indent=4)
             handle.write(serialized)
+
+    def save_toml(self, filepath):
+        serializable = copy.deepcopy(self)
+        serializable.filters = [str(f) for f in serializable.filters]
+        serializable = serializable.__dict__
+        with open(filepath, 'w') as handle:
+            handle.write(toml.dumps(serializable, encoder=toml.TomlNumpyEncoder()))
 
     def save_fits(self, filepath, bin_num=(0,)):
         """
