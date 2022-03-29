@@ -580,14 +580,10 @@ class Spectrum:
                     if key not in data_dict.keys():
                         data_dict[key] = q[key]
 
-        # This is ridiculous
-        hdu.close()
-        del hdu
         del t
+        del q
+        del hdr
         del specobj
-
-        # if not name:
-        #     name = utils.iauname(ra, dec)
 
         # Interpolating over bad pixels
         bad = np.where(~np.isfinite(flux) & ~np.isfinite(error))[0]

@@ -1,10 +1,10 @@
 # BIFR&#xd6;ST
-## Black holes Ionizing Forbidden Radiation and Outflows via Simple Tests
+## Black hole Investigations of Forbidden-line Radiation and Other Spectral Tools
 
-This code aims to bridge the gap between stellar mass black holes and supermassive
-black holes, just as the burning rainbow bridge it is named after bridges the gap
-between Asgard and Midgard, by providing a means of searching for them via a
-spectral stacking framework.
+This code aims to connect galaxy spectra to coronal line detections, just as 
+the burning rainbow bridge it is named after connects Asgard and Midgard, 
+by providing a means of searching for them via a framework for analyzing spectra
+with simple tests and a stacking procedure.
 
 ## Installation
 After cloning the repository, you can install locally via pip: ` pip install . `
@@ -27,9 +27,6 @@ After cloning the repository, you can install locally via pip: ` pip install . `
 
 <br> I can't guarantee this package will work  for any versions of these requirements
 outside the suggestions above.
-
-*Note: It may be necessary to increase the open file limit with* ` ulimit -n XXXX `, *depending
-on how many spectra you are stacking at once.*
 
 ## Documentation Summary
 Most of the functions of this module are built around three core objects: `Spectrum`, `Spectra`, 
