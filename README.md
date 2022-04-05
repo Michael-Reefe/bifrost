@@ -1,5 +1,5 @@
 # BIFR&#xd6;ST
-## Black hole Investigations of Forbidden-line Radiation and Other Spectral Tools
+## Black hole Investigations of Forbidden-line Radiation in Optical SpecTra
 
 This code aims to connect galaxy spectra to coronal line detections, just as 
 the burning rainbow bridge it is named after connects Asgard and Midgard, 
