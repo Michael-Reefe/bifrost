@@ -17,6 +17,8 @@ import bifrost
 
 class NeuralNet:
 
+    # A class for creating and training neural networks to detect optical coronal lines
+
     __slots__ = ['min_wave', 'max_wave', 'spec_size', 'n_extra_params', 'loss', 'optimizer', 'metrics', 'model', 
                  'regressor', 'search_model']
     config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "config", "neural.net.toml"))
@@ -24,6 +26,25 @@ class NeuralNet:
 
     def __init__(self, spec_size=None, min_wave=None, max_wave=None, loss=tf.keras.losses.BinaryCrossentropy,
                  optimizer=tf.keras.optimizers.Adam, metrics=('binary_accuracy',)):
+        """
+        Initialize the neural network.
+
+        :param spec_size: int
+            Number of pixels that the logarithmically-spaced wavelength grid for the neural network should take up,
+            defaults to 101.
+        :param min_wave: float
+            Minimum wavelength of the grid, defaults to line-50.
+        :param max_wave: float
+            Maximum wavelength of the grid, defaults to line+50.
+        :param loss: tensorflow.keras.losses
+            Loss function for the neural network. Defaults to BinaryCrossentropy.
+        :param optimizer: tensorflow.keras.optimizers
+            Optimizer for the neural network.  Defaults to Adam.
+        :param metrics: iterable
+            Metrics for the neural network.  Defaults to ('binary_accuracy',).
+        :return self:
+            The NeuralNet instance.
+        """
 
         param_distribs = {
             "n_layers": Integer(1, 6, prior="uniform"),
@@ -48,6 +69,18 @@ class NeuralNet:
         self.metrics = metrics
     
     def _build_model(self, n_layers, n_neurons, learning_rate):
+        """
+        Helper function to build a keras model with the given parameters
+
+        :param n_layers: int
+            Number of dense layers of the neural network
+        :param n_neurons: int
+            Number of neurons per dense layer of the neural network
+        :param learning_rate: float
+            The learning rate of the neural network
+        :return model: tensorflow.keras.models.Sequential
+            The keras neural network.
+        """
         model = tf.keras.models.Sequential()
         model.add(tf.keras.layers.Flatten(input_shape=(self.spec_size+self.n_extra_params,)))
         for layer in range(n_layers):
@@ -56,11 +89,29 @@ class NeuralNet:
         model.compile(loss=self.loss(from_logits=True), optimizer=self.optimizer(learning_rate=learning_rate), metrics=self.metrics)
         return model
 
-    def train(self, line="generic_line", target_line=0, size=100_000, epochs=100, out_path="neuralnet_training_data", save=True,
+    def train(self, line="generic_line", target_line=0, size=100_000, epochs=11, out_path="neuralnet_training_data", save=True,
               save_path="bifrost.neuralnet.h5", plot=True):
+        """
+        The main function for training the neural network to recognize a specific optical coronal line ("line") using simulated data
 
-        # TODO: add automatic sets of lines so that you only need to pass in the one CL of interest
-        # OR look at an entire spectrum at once
+        :param line: str, iterable
+            The line name(s) to include in the simulated training data
+        :param target_line: int
+            The index of which line in the "line" argument is the line to train the neural network to detect. Default = 0.
+        :param size: int
+            The size of the simulated dataset. Default = 100_000.
+        :param epochs: int
+            The number of epochs to train the data for. Default = 11.
+        :param out_path: str
+            The output path for saving the neural network h5 file, or any plots. Default = 'neuralnet_training_data'
+        :param save: bool
+            Whether or not to save the trained network as an h5 file. Default = True.
+        :param save_path: str
+            The name of the h5 file to be saved if save=True. Default = 'bifrost.neuralnet.h5'
+        :param plot: bool
+            Whether or not to plot a subset of the simulated training data (100). Default = True.
+        :return None:
+        """
 
         training_parameters = NeuralNet.config["training_parameters"]
         # Make RNG seeds
@@ -270,14 +321,43 @@ class NeuralNet:
 
     @staticmethod
     def normalize(data):
+        """
+        A helper function to normalize training data to have a mean of 0 and standard deviation of 1.
+
+        :param data: np.ndarray
+            The array of data to be normalized.
+        :return: np.ndarray
+            The normalized data.
+        """
         mu = np.nanmean(data, axis=-1)
         sigma = np.std(data, axis=-1)
         return ((data.T - mu) / sigma).T, mu, sigma
 
     def load(self, path):
+        """
+        Load an already-trained keras model into the neural network via an h5 file.
+
+        :param path: str
+            The path to the h5 file to load.
+        :return None:
+        """
         self.model = tf.keras.models.load_model(path)
 
     def predict(self, test_stack, p_layer="sigmoid", plot=False, out_path=None):
+        """
+        Use the trained neural network to predict the presence of coronal lines in real data.
+
+        :param test_stack: bifrost.Stack
+            A Stack object containing the spectra to test for coronal lines.
+        :param p_layer: str
+            The type of activation layer to use for the prediction results. Default = 'sigmoid'.
+        :param plot: bool
+            Whether or not to plot the resultant spectra with their predictions. Default = False.
+        :param out_path: str
+            The output path to save plots if plot = True.
+        :return predictions: np.ndarray
+            Array of prediction values (confidences between 0-1) for each spectrum in the input stack.
+        """
         # Construct wavelength grid for the inputs
         wave_grid = np.geomspace(self.min_wave, self.max_wave, self.spec_size)
         # Resample input spectra onto the proper shaped wavelength grid for input to the neural network
@@ -295,21 +375,6 @@ class NeuralNet:
         print(predictions)
 
         if plot:
-            # fig, ax = plt.subplots(3, 3, sharex=True, sharey=True)
-            # k = 0
-            # for i in range(3):
-            #     for j in range(3):
-            #         if len(test_stack) > k:
-            #             ax[i, j].plot(test_stack[k].wave, test_stack[k].flux, 'k-')
-            #             ax[i, j].fill_between(test_stack[k].wave, (test_stack[k].flux-test_stack[k].error),
-            #                                 (test_stack[k].flux+test_stack[k].error),
-            #                                 color='g', alpha=0.4)
-            #             ax[i, j].set_xlabel(f'Line: {predictions[k, 0]:.2f}')
-            #             if xlim is not None:
-            #                 ax[i, j].set_xlim(*xlim)
-            #             k += 1
-            # plt.savefig('prediction_plot.pdf', dpi=300, bbox_inches='tight')
-            # plt.close()
             if out_path is None:
                 out_path = "neuralnet_training_data"
             test_stack.plot_spectra(out_path, backend='pyplot', _range=(self.min_wave, self.max_wave),
