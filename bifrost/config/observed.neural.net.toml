@@ -1,0 +1,629 @@
+# NEURAL NETWORK CONFIGURATIONS FILE
+# These are mostly default options that can be overridden with function arguments
+# However, if one desires to change the default behaviors of these functions, the values
+# in this config file may be changed.
+
+# UNUSED:
+# Primarily one is concerned with the SNR threshold above which one can be confident a line has been detected or not
+# By default we impose this to be an SNR >= 10, and we condition the network to recognize this by only marking the training
+# data as a "detection" when the SNR of the simulated emission line is >= 3.  However this can be changed to any arbitrary
+# SNR that is desired.
+# Here, SNR is defined as line amplitude / random noise amplitude.
+# SNR = 3
+
+# Default training parameters for different optical coronal line networks
+[training_parameters]
+
+# power law slope that affects all training spectra
+# defaults to a normal distribution centered at 0 with a standard deviation of 0.25
+[training_parameters.power_slope]
+dist = "normal"
+mean = 0.0
+std = 0.25
+
+# Global noise parameters to apply to a full spectrum
+[training_parameters.noise]
+dist = "uniform"
+min = 0.01
+max = 0.3
+
+# Profiles are generally strong, wide, and can be Gaussian, Lorentzian, or Voigt
+# Each line profile should define the following parameters:
+#   - profile (line profile shape)
+#   - amp (line amplitude, normalized units)
+#   - fwhm (line width, km/s)
+#   - voff (line velocity offset, km/s)
+# If the profile is "GH", then one must also define:
+#   - h3 (skewness, unitless)
+#   - h4 (kurtosis, unitless)
+# If the profile is "V", then one must also define:
+#   - eta (mixing parameter, unitless)
+# If the profile is "random", then one must define h3, h4, and eta.
+
+# Default, generic line with no defining characteristics
+[training_parameters.generic_line]
+wavelength = 6000
+detect_ratio = 0.5  # The detection ratio: the fraction of spectra, on average, that will actually contain the line
+                    # NOTE: this doesn't have to be realistic; it's just for the training data
+profile = "random"  # Can be random, "GH" for Gauss-Hermite, "L" for Lorentzian, or "V" for pseudo-Voigt
+
+[training_parameters.generic_line.amp]
+dist = "uniform"  # Distribution can be any np.random function (uniform, normal, random, randint, etc.)
+min = 0.01         # For the uniform distribution, "min" and "max" keywords are required
+max = 2.0
+[training_parameters.generic_line.fwhm]
+dist = "uniform"
+min = 10
+max = 800
+[training_parameters.generic_line.voff]
+dist = "normal"  # For the normal distribution, "mean" and "std" keywords are required
+mean = 0
+std = 100
+[training_parameters.generic_line.h3]
+dist = "normal"
+mean = 0.0
+std = 0.4
+[training_parameters.generic_line.h4]
+dist = "normal"
+mean = 0.0
+std = 0.4
+[training_parameters.generic_line.eta]
+dist = "uniform"
+min = 0.0
+max = 1.0
+
+# Supplementary NON-CORONAL Lines
+# [O I] 6302
+[training_parameters.OI_6302]
+wavelength = 6302.046
+detect_ratio = 0.8
+profile = "GH"
+
+[training_parameters.OI_6302.amp]
+dist = "uniform"
+min = 1.1
+max = 2.5
+[training_parameters.OI_6302.fwhm]
+dist = "normal"
+mean = 400
+std = 100
+[training_parameters.OI_6302.voff]
+dist = "normal"
+mean = 0
+std = 100
+[training_parameters.OI_6302.h3]
+dist = "uniform"
+min = 0.0
+max = 0.0
+[training_parameters.OI_6302.h4]
+dist = "uniform"
+min = 0.0
+max = 0.0
+
+# [O I] 6365
+[training_parameters.OI_6365]
+wavelength = 6365.535
+detect_ratio = "OI_6302"
+profile = "GH"
+
+[training_parameters.OI_6365.amp]
+dist = "constrained"
+constraint = ["OI_6302", "amp/3"]
+[training_parameters.OI_6365.fwhm]
+dist = "constrained"
+constraint = ["OI_6302", "fwhm"]
+[training_parameters.OI_6365.voff]
+dist = "constrained"
+constraint = ["OI_6302", "voff"]
+[training_parameters.OI_6365.h3]
+dist = "constrained"
+constraint = ["OI_6302", "h3"]
+[training_parameters.OI_6365.h4]
+dist = "constrained"
+constraint = ["OI_6302", "h4"]
+
+# CORONAL LINES
+# [Fe XI] 7892
+[training_parameters.FeXI_7892]
+wavelength = 7891.800
+detect_ratio = 0.5
+profile = "GH"
+
+[training_parameters.FeXI_7892.amp]
+# For a sense of scale, [Ne V] 3426 at 160 erg/s/cm^2/A with a baseline of 40 erg/s/cm^2/A is around ~3 (relative to baseline) in normalized units
+# The dimmest [Fe VII] 5276 is 35 erg/s/cm^2/A with a baseline of 30 erg/s/cm^2/A or around ~0.167 (relative to baseline) in normalized units
+dist = "uniform"
+min = 0.25
+max = 2.0
+[training_parameters.FeXI_7892.fwhm]
+dist = "normal"
+mean = 300
+std = 150
+[training_parameters.FeXI_7892.voff]
+dist = "normal"
+mean = -50
+std = 50
+[training_parameters.FeXI_7892.h3]
+dist = "uniform"
+min = 0.0
+max = 0.0
+[training_parameters.FeXI_7892.h4]
+dist = "uniform"
+min = 0.0
+max = 0.0
+
+# [S XII] 7609
+[training_parameters.SXII_7609]
+wavelength = 7611.000
+detect_ratio = 0.5
+profile = "GH"
+
+[training_parameters.SXII_7609.amp]
+dist = "uniform"
+min = 0.25
+max = 2.25
+[training_parameters.SXII_7609.fwhm]
+dist = "normal"
+mean = 300
+std = 50
+[training_parameters.SXII_7609.voff]
+dist = "normal"
+mean = -250
+std = 50
+[training_parameters.SXII_7609.h3]
+dist = "uniform"
+min = 0.0
+max = 0.0
+[training_parameters.SXII_7609.h4]
+dist = "uniform"
+min = 0.0
+max = 0.0
+
+# [Fe X] 6374
+[training_parameters.FeX_6374]
+wavelength = 6374.510
+detect_ratio = 0.5
+profile = "GH"
+
+[training_parameters.FeX_6374.amp]
+dist = "lognormal"
+mean = -0.7
+std = 1.0
+[training_parameters.FeX_6374.fwhm]
+dist = "normal"
+mean = 250
+std = 200
+[training_parameters.FeX_6374.voff]
+dist = "normal"
+mean = -125
+std = 125
+[training_parameters.FeX_6374.h3]
+dist = "uniform"
+min = 0.0
+max = 0.0
+[training_parameters.FeX_6374.h4]
+dist = "uniform"
+min = 0.0
+max = 0.0
+
+# [Fe VII] 6087
+[training_parameters.FeVII_6087]
+wavelength = 6087.000
+detect_ratio = 0.5
+profile = "GH"
+
+[training_parameters.FeVII_6087.amp]
+dist = "uniform"
+min = 0.25
+max = 3.0
+[training_parameters.FeVII_6087.fwhm]
+dist = "normal"
+mean = 500
+std = 150
+[training_parameters.FeVII_6087.voff]
+dist = "normal"
+mean = -10
+std = 100
+[training_parameters.FeVII_6087.h3]
+dist = "uniform"
+min = 0.0
+max = 0.0
+[training_parameters.FeVII_6087.h4]
+dist = "uniform"
+min = 0.0
+max = 0.0
+
+# [Fe VII] 5720
+[training_parameters.FeVII_5720]
+wavelength = 5720.700
+detect_ratio = "FeVII_6087"
+profile = "GH"
+
+[training_parameters.FeVII_5720.amp]
+dist = "constrained"
+constraint = ["FeVII_6087", "randc*amp"]
+[training_parameters.FeVII_5720.fwhm]
+dist = "constrained"
+constraint = ["FeVII_6087", "fwhm"]
+[training_parameters.FeVII_5720.voff]
+dist = "constrained"
+constraint = ["FeVII_6087", "voff"]
+[training_parameters.FeVII_5720.h3]
+dist = "constrained"
+constraint = ["FeVII_6087", "h3"]
+[training_parameters.FeVII_5720.h4]
+dist = "constrained"
+constraint = ["FeVII_6087", "h4"]
+
+# [Ar X] 5533
+[training_parameters.ArX_5533]
+wavelength = 5533.265
+detect_ratio = 0.5
+profile = "L"
+
+[training_parameters.ArX_5533.amp]
+dist = "uniform"
+min = 0.25
+max = 3.0
+[training_parameters.ArX_5533.fwhm]
+dist = "normal"
+mean = 250
+std = 250
+[training_parameters.ArX_5533.voff]
+dist = "normal"
+mean = -400
+std = 100
+
+# [Fe VI] 5335
+[training_parameters.FeVI_5335]
+wavelength = 5335.180
+detect_ratio = 0.5
+profile = "GH"
+
+[training_parameters.FeVI_5335.amp]
+dist = "uniform"
+min = 0.25
+max = 3.0
+[training_parameters.FeVI_5335.fwhm]
+dist = "normal"
+mean = 100
+std = 50
+[training_parameters.FeVI_5335.voff]
+dist = "normal"
+mean = -250
+std = 125
+[training_parameters.FeVI_5335.h3]
+dist = "uniform"
+min = 0.0
+max = 0.0
+[training_parameters.FeVI_5335.h4]
+dist = "uniform"
+min = 0.0
+max = 0.0
+
+# [Ca V] 5309
+[training_parameters.CaV_5309]
+wavelength = 5309.110
+detect_ratio = 0.5
+profile = "GH"
+
+[training_parameters.CaV_5309.amp]
+dist = "uniform"
+min = 1.0
+max = 3.0
+[training_parameters.CaV_5309.fwhm]
+dist = "normal"
+mean = 250
+std = 250
+[training_parameters.CaV_5309.voff]
+dist = "normal"
+mean = 0
+std = 125
+[training_parameters.CaV_5309.h3]
+dist = "uniform"
+min = 0.0
+max = 0.0
+[training_parameters.CaV_5309.h4]
+dist = "uniform"
+min = 0.0
+max = 0.0
+
+# [Fe XIV] 5303
+[training_parameters.FeXIV_5303]
+wavelength = 5302.860
+detect_ratio = 0.5
+profile = "GH"
+
+[training_parameters.FeXIV_5303.amp]
+dist = "uniform"
+min = 1.0
+max = 3.0
+[training_parameters.FeXIV_5303.fwhm]
+dist = "normal"
+mean = 350
+std = 125
+[training_parameters.FeXIV_5303.voff]
+dist = "normal"
+mean = -125
+std = 50
+[training_parameters.FeXIV_5303.h3]
+dist = "uniform"
+min = 0.0
+max = 0.0
+[training_parameters.FeXIV_5303.h4]
+dist = "uniform"
+min = 0.0
+max = 0.0
+
+# [Fe VII] 5276
+[training_parameters.FeVII_5276]
+wavelength = 5276.380
+detect_ratio = 0.5
+profile = "GH"
+
+[training_parameters.FeVII_5276.amp]
+dist = "uniform"
+min = 0.25
+max = 1.0
+[training_parameters.FeVII_5276.fwhm]
+dist = "normal"
+mean = 100
+std = 50
+[training_parameters.FeVII_5276.voff]
+dist = "normal"
+mean = -250
+std = 125
+[training_parameters.FeVII_5276.h3]
+dist = "uniform"
+min = 0.0
+max = 0.0
+[training_parameters.FeVII_5276.h4]
+dist = "uniform"
+min = 0.0
+max = 0.0
+
+# [Fe VI] 5176
+[training_parameters.FeVI_5176]
+wavelength = 5176.040
+detect_ratio = 0.5
+profile = "GH"
+
+[training_parameters.FeVI_5176.amp]
+dist = "uniform"
+min = 1.0
+max = 3.5
+[training_parameters.FeVI_5176.fwhm]
+dist = "normal"
+mean = 100
+std = 50
+[training_parameters.FeVI_5176.voff]
+dist = "normal"
+mean = -125
+std = 125
+[training_parameters.FeVI_5176.h3]
+dist = "uniform"
+min = 0.0
+max = 0.0
+[training_parameters.FeVI_5176.h4]
+dist = "uniform"
+min = 0.0
+max = 0.0
+
+# [Fe VII] 5159
+[training_parameters.FeVII_5159]
+wavelength = 5158.890
+detect_ratio = 0.5
+profile = "GH"
+
+[training_parameters.FeVII_5159.amp]
+dist = "uniform"
+min = 0.25
+max = 1.0
+[training_parameters.FeVII_5159.fwhm]
+dist = "normal"
+mean = 250
+std = 100
+[training_parameters.FeVII_5159.voff]
+dist = "normal"
+mean = -125
+std = 125
+[training_parameters.FeVII_5159.h3]
+dist = "uniform"
+min = 0.0
+max = 0.0
+[training_parameters.FeVII_5159.h4]
+dist = "uniform"
+min = 0.0
+max = 0.0
+
+# [Fe VI] 5146
+[training_parameters.FeVI_5146]
+wavelength = 5145.750
+detect_ratio = 0.5
+profile = "GH"
+
+[training_parameters.FeVI_5146.amp]
+dist = "uniform"
+min = 1.0
+max = 3.0
+[training_parameters.FeVI_5146.fwhm]
+dist = "normal"
+mean = 100
+std = 50
+[training_parameters.FeVI_5146.voff]
+dist = "normal"
+mean = -250
+std = 125
+[training_parameters.FeVI_5146.h3]
+dist = "uniform"
+min = 0.0
+max = 0.0
+[training_parameters.FeVI_5146.h4]
+dist = "uniform"
+min = 0.0
+max = 0.0
+
+# [Fe VII] 4893
+[training_parameters.FeVII_4893]
+wavelength = 4893.370
+detect_ratio = 0.5
+profile = "GH"
+
+[training_parameters.FeVII_4893.amp]
+dist = "uniform"
+min = 1.0
+max = 3.5
+[training_parameters.FeVII_4893.fwhm]
+dist = "normal"
+mean = 100
+std = 200
+[training_parameters.FeVII_4893.voff]
+dist = "normal"
+mean = -125
+std = 200
+[training_parameters.FeVII_4893.h3]
+dist = "uniform"
+min = 0.0
+max = 0.0
+[training_parameters.FeVII_4893.h4]
+dist = "uniform"
+min = 0.0
+max = 0.0
+
+# [Fe V] 4181
+[training_parameters.FeV_4181]
+wavelength = 4180.600
+detect_ratio = 0.5
+profile = "GH"
+
+[training_parameters.FeV_4181.amp]
+dist = "uniform"
+min = 1.0
+max = 3.5
+[training_parameters.FeV_4181.fwhm]
+dist = "normal"
+mean = 100
+std = 50
+[training_parameters.FeV_4181.voff]
+dist = "normal"
+mean = 0
+std = 200
+[training_parameters.FeV_4181.h3]
+dist = "uniform"
+min = 0.0
+max = 0.0
+[training_parameters.FeV_4181.h4]
+dist = "uniform"
+min = 0.0
+max = 0.0
+
+# [Fe V] 3891
+[training_parameters.FeV_3891]
+wavelength = 3891.280
+detect_ratio = 0.5
+profile = "GH"
+
+[training_parameters.FeV_3891.amp]
+dist = "uniform"
+min = 2.0
+max = 3.5
+[training_parameters.FeV_3891.fwhm]
+dist = "normal"
+mean = 100
+std = 50
+[training_parameters.FeV_3891.voff]
+dist = "normal"
+mean = 0
+std = 50
+[training_parameters.FeV_3891.h3]
+dist = "uniform"
+min = 0.0
+max = 0.0
+[training_parameters.FeV_3891.h4]
+dist = "uniform"
+min = 0.0
+max = 0.0
+
+# [Fe V] 3839
+[training_parameters.FeV_3839]
+wavelength = 3839.270
+detect_ratio = "FeV_3891"
+profile = "GH"
+
+[training_parameters.FeV_3839.amp]
+dist = "constrained"
+constraint = ["FeV_3891", "randc2*amp"]
+[training_parameters.FeV_3839.fwhm]
+dist = "constrained"
+constraint = ["FeV_3891", "fwhm"]
+[training_parameters.FeV_3839.voff]
+dist = "constrained"
+constraint = ["FeV_3891", "voff"]
+[training_parameters.FeV_3839.h3]
+dist = "constrained"
+constraint = ["FeV_3891", "h3"]
+[training_parameters.FeV_3839.h4]
+dist = "constrained"
+constraint = ["FeV_3891", "h4"]
+
+# [Fe VII] 3759
+[training_parameters.FeVII_3759]
+wavelength = 3758.920
+detect_ratio = 0.5
+profile = "GH"
+
+[training_parameters.FeVII_3759.amp]
+dist = "uniform"
+min = 1.0
+max = 3.5
+[training_parameters.FeVII_3759.fwhm]
+dist = "normal"
+mean = 100
+std = 50
+[training_parameters.FeVII_3759.voff]
+dist = "normal"
+mean = -375
+std = 250
+[training_parameters.FeVII_3759.h3]
+dist = "uniform"
+min = 0.0
+max = 0.0
+[training_parameters.FeVII_3759.h4]
+dist = "uniform"
+min = 0.0
+max = 0.0
+
+# [Ne V] 3426
+[training_parameters.NeV_3426]
+wavelength = 3426.863
+detect_ratio = 0.5
+profile = "L"
+
+[training_parameters.NeV_3426.amp]
+dist = "uniform"
+min = 2.5
+max = 4.0
+[training_parameters.NeV_3426.fwhm]
+dist = "normal"
+mean = 400
+std = 100
+[training_parameters.NeV_3426.voff]
+dist = "normal"
+mean = -175
+std = 100
+
+# [Ne V] 3346
+[training_parameters.NeV_3346]
+wavelength = 3346.783
+detect_ratio = 0.5
+profile = "L"
+
+[training_parameters.NeV_3346.amp]
+dist = "constrained"
+constraint = ["NeV_3426", "randc*amp"]
+[training_parameters.NeV_3346.fwhm]
+dist = "constrained"
+constraint = ["NeV_3426", "fwhm"]
+[training_parameters.NeV_3346.voff]
+dist = "constrained"
+constraint = ["NeV_3426", "voff"]

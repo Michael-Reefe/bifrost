@@ -1,0 +1,318 @@
+from multiprocessing.sharedctypes import Value
+import numpy as np
+import matplotlib.pyplot as plt
+import tensorflow as tf
+import toml
+import os
+import numexpr as ne
+
+from scipy.stats import reciprocal
+from skopt.searchcv import BayesSearchCV
+from skopt.plots import plot_objective, plot_histogram
+from skopt.space import Real, Integer, Categorical
+
+import bifrost.maths as maths
+import bifrost
+
+
+class NeuralNet:
+
+    __slots__ = ['min_wave', 'max_wave', 'spec_size', 'n_extra_params', 'loss', 'optimizer', 'metrics', 'model', 
+                 'regressor', 'search_model']
+    config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "config", "neural.net.toml"))
+    config = toml.load(config_path)
+
+    def __init__(self, spec_size=None, min_wave=None, max_wave=None, loss=tf.keras.losses.BinaryCrossentropy,
+                 optimizer=tf.keras.optimizers.Adam, metrics=('binary_accuracy',)):
+
+        param_distribs = {
+            "n_layers": Integer(1, 6, prior="uniform"),
+            "n_neurons": Integer(0, 100, prior="uniform"),
+            "learning_rate": Real(1e-10, 1e-1, prior="log-uniform")
+        }
+
+        self.regressor = tf.keras.wrappers.scikit_learn.KerasRegressor(self._build_model)
+        self.search_model = BayesSearchCV(self.regressor, param_distribs, n_iter=50, cv=3, n_jobs=3, refit=True, verbose=9)
+        self.model = None
+
+        # Create the overall wavelength grid and the keras model
+        self.min_wave = min_wave
+        self.max_wave = max_wave
+        self.spec_size = spec_size
+        # Number of extra parameters to add to input data aside from flux:
+        # 1. RMS of the flux
+        self.n_extra_params = 1
+        # Model hyperparameters
+        self.loss = loss
+        self.optimizer = optimizer
+        self.metrics = metrics
+    
+    def _build_model(self, n_layers, n_neurons, learning_rate):
+        model = tf.keras.models.Sequential()
+        model.add(tf.keras.layers.Flatten(input_shape=(self.spec_size+self.n_extra_params,)))
+        for layer in range(n_layers):
+            model.add(tf.keras.layers.Dense(n_neurons, activation="relu"))
+        model.add(tf.keras.layers.Dense(1))
+        model.compile(loss=self.loss(from_logits=True), optimizer=self.optimizer(learning_rate=learning_rate), metrics=self.metrics)
+        return model
+
+    def train(self, line="generic_line", target_line=0, size=100_000, epochs=100, out_path="neuralnet_training_data", save=True,
+              save_path="bifrost.neuralnet.h5", plot=True):
+
+        # TODO: add automatic sets of lines so that you only need to pass in the one CL of interest
+        # OR look at an entire spectrum at once
+
+        training_parameters = NeuralNet.config["training_parameters"]
+        # Make RNG seeds
+        power = int(np.log10(size))
+        rng_seeds = np.random.randint(int(10**power), int(10**(power+1)-1), size)
+
+        # Get shape for outputs based on wavelength
+        if type(line) in (str, np.str_):
+            if line not in training_parameters["line_sets"].keys():
+                wavelength = [training_parameters[line]['wavelength']]
+                line = [line]
+                SHAPE = (size,1)
+            else:
+                line = [line]
+                wavelength = [training_parameters[line[0]]['wavelength']]
+                for li in training_parameters["line_sets"][line[0]]:
+                    line.append(li)
+                    wavelength.append(training_parameters[li]['wavelength'])
+                SHAPE = (size,len(line))
+        elif type(line) in (list, np.ndarray):
+            for li in line:
+                for lli in training_parameters["line_sets"][li]:
+                    if lli not in line:
+                        line.append(lli)
+            wavelength = [training_parameters[li]['wavelength'] for li in line]
+            SHAPE = (size,len(line))
+        else:
+            raise ValueError("line must be one of: int, float, list, np.ndarray")
+        line = np.asarray(line)
+        wavelength = np.asarray(wavelength)
+
+        if self.min_wave is None:
+            self.min_wave = np.min(wavelength) - 50
+        if self.max_wave is None:
+            self.max_wave = np.max(wavelength) + 50
+        if self.spec_size is None:
+            self.spec_size = int(np.max(wavelength) - np.min(wavelength) + 101)
+
+        # Initialize output parameters, baselines, and noise
+        output_parameters = {}
+        baselines = np.ones(size)
+        constrained = []               
+
+        # Initialize parameters that are constant for every line: random noise and the power slope
+        for param in ("noise", "power_slope"):
+            if training_parameters[param]['dist'] == 'uniform':
+                p1, p2 = 'min', 'max'
+            elif training_parameters[param]['dist'] in ('normal', 'lognormal'):
+                p1, p2 = 'mean', 'std'
+            else:
+                raise ValueError(f"Unrecognized dist config parameter '{training_parameters[param]['dist']}'")
+            output_parameters[param] = eval(f"np.random.{training_parameters[param]['dist']}({training_parameters[param][p1]}," 
+                        f"{training_parameters[param][p2]}, {size})")
+
+        # Initialize parameters that are different for every line
+        for param in ("amp", "fwhm", "voff", "h3", "h4", "eta"):
+            output_parameters[param] = np.zeros(SHAPE)
+            # Create the distributions
+            output_parameters[param] = np.zeros(SHAPE)
+            for i, li in enumerate(line):
+                # Check for profile-specific features
+                if param in ("h3", "h4") and training_parameters[li]["profile"] not in ("GH", "random"):
+                    output_parameters[param][:, i] = np.nan
+                    continue
+                if param == "eta" and training_parameters[li]["profile"] not in ("V", "random"):
+                    output_parameters[param][:, i] = np.nan
+                    continue
+
+                # Generate keywords
+                if training_parameters[li][param]['dist'] == 'uniform':
+                    p1, p2 = 'min', 'max'
+                elif training_parameters[li][param]['dist'] in ('normal', 'lognormal'):
+                    p1, p2 = 'mean', 'std'
+                elif training_parameters[li][param]['dist'] == 'constrained':
+                    constrained.append((i, param))
+                    continue
+                else:
+                    raise ValueError(f"Unrecognized dist config parameter '{training_parameters[li][param]['dist']}'")
+
+                output_parameters[param][:, i] = eval(f"np.random.{training_parameters[li][param]['dist']}"
+                    f"({training_parameters[li][param][p1]}, {training_parameters[li][param][p2]}, {size})")
+        
+        # Make some ratio of the simulated spectra have no line of interest
+        # output_parameters["amp"][:output_parameters["amp"].shape[0]//2, target_line] = 0.
+        for i in range(len(line)):
+            if type(training_parameters[line[i]]["detect_ratio"]) is float:
+                # Small adjustment to the ratio to make the end result be more close to the input ratio 
+                # (accounting for those with SNR < the threshold)
+                epsilon = 1.2 if training_parameters[line[i]]["detect_ratio"] < 0.833 else 1
+
+                idx = int((1 - epsilon*training_parameters[line[i]]["detect_ratio"]) * len(output_parameters["amp"][:, i]))
+                ids = np.random.choice(range(len(output_parameters["amp"][:, i])), idx, replace=False)
+                output_parameters["amp"][ids, i] = 0.
+        # Need to make 2 passes in case the line that doublets depend on appears after it does in the line list
+        for i in range(len(line)):
+            if type(training_parameters[line[i]]["detect_ratio"]) is str: 
+                li = np.where(line == training_parameters[line[i]]["detect_ratio"])[0][0]
+                noline = np.where(output_parameters["amp"][:, li] == 0.)[0]
+                output_parameters["amp"][noline, i] = 0.
+        # Special case for [Fe X] -- remove any detections where [O I] is not detected
+        if "FeX_6374" in line and "OI_6302" in line and "OI_6365" in line:
+            oi1 = np.where(line == "OI_6302")[0][0]
+            fi = np.where(line == "FeX_6374")[0][0]
+            noline = np.where(output_parameters["amp"][:, oi1] == 0.)[0]
+            output_parameters["amp"][noline, fi] = 0.
+            # yesline = np.where(output_parameters["amp"][:, oi1] > 0.)[0]
+            # idy = int(training_parameters[line[fi]]["detect_ratio"] * len(yesline))
+            # output_parameters["amp"][yesline[:idy], fi] = 0.
+
+        for c in constrained:
+            constraint = training_parameters[line if type(line) in (str, np.str_) else line[c[0]]][c[1]]
+            assert constraint['dist'] == 'constrained'
+            l_expr, n_expr = constraint['constraint'][0], constraint['constraint'][1]
+
+            # Aliasing for nice-looking numexpr strings in the toml file:
+            c_l = 0 if type(line) in (str, np.str_) else np.where(line == l_expr)[0][0]
+            amp = output_parameters["amp"][:, c_l]
+            noise = output_parameters["noise"][c_l]
+            fwhm = output_parameters["fwhm"][:, c_l]
+            voff = output_parameters["voff"][:, c_l]
+            h3 = output_parameters["h3"][:, c_l]
+            h4 = output_parameters["h4"][:, c_l]
+            eta = output_parameters["eta"][:, c_l]
+            # Randomized coefficients for use in numexpr
+            randc = np.random.uniform(0.7, 1, len(amp))
+            randc2 = np.random.uniform(0.3, 0.5, len(amp))
+        
+            output_parameters[c[1]][:, c[0]] = ne.evaluate(n_expr)
+
+        # Parameter constraints
+        # Ensure certain parameters remain positive
+        output_parameters["amp"][output_parameters["amp"] < 0] = 0
+        if output_parameters["eta"] is not None:
+            output_parameters["eta"][output_parameters["eta"] < 0] = 0
+            output_parameters["eta"][output_parameters["eta"] > 1] = 1
+        # Ensure certain parameters remain nonzero
+        output_parameters["fwhm"][output_parameters["fwhm"] <= 0] = 1
+        output_parameters["noise"][output_parameters["noise"] <= 0] = 0.01
+
+
+        profile = [training_parameters[li]["profile"] for li in line]
+        h_moments = np.dstack((output_parameters["h3"], output_parameters["h4"]))
+
+        print("Preparing data for neural network training...")
+        # breakpoint()
+        # Create simulated data
+        stack = bifrost.Stack.quick_sim_stack(
+            wavelength, baselines, output_parameters["amp"], output_parameters["fwhm"],
+            output_parameters["voff"], output_parameters["power_slope"], h_moments=h_moments, eta_mixes=output_parameters["eta"],
+            noise_amplitudes=output_parameters["noise"], profiles=profile, min_wave=self.min_wave,
+            max_wave=self.max_wave, size=self.spec_size, seeds=rng_seeds, out_path=out_path, progress_bar=True)
+
+        labels = np.where(output_parameters["amp"][:, target_line] / output_parameters["noise"] > NeuralNet.config["SNR"], 1, 0)
+        # labels = np.where(output_parameters["amp"][:, target_line] > 0, 1, 0)
+        # labels = np.concatenate(([0] * (size // 2), [1] * (size // 2)))
+        # labels = np.array([(0,1)[stack[i].data["snr"][target_line] >= NeuralNet.config["SNR"]] for i in range(len(stack))])
+        # For debugging purposes:
+        if plot:
+            stack.plot_spectra(out_path, backend='pyplot', spectra=list(stack.keys())[0:100], 
+                            _range=(self.min_wave, self.max_wave), 
+                            ylim=(0,5), title_text={label: f"Line: {labels[i]}, SNR: {output_parameters['amp'][i, target_line]/output_parameters['noise'][i]:.2f}, "
+                            f"Amp: {output_parameters['amp'][i, target_line]:.2f}, Noise: {output_parameters['noise'][i]:.2f}" for i, label in enumerate(stack)})
+
+        # Split data into train, validation, and test sets
+        ind = np.array(range(len(stack)))
+        np.random.shuffle(ind)
+        i1 = len(stack)*8//10
+        i2 = len(stack)*9//10
+        train_set = ind[0:i1]
+        valid_set = ind[i1:i2]
+        test_set = ind[i2:]
+
+        # Resample each spectrum onto full_wave_grid, preserving flux and error
+        train_data, tmu, tsig = self.normalize(np.array([stack[i].flux for i in train_set], dtype=float))
+        # train_err = ((np.array([stack[i].error for i in train_set], dtype=float).T - tmu) / tsig).T
+        train_err = np.array([np.nanstd(stack[i].flux) for i in train_set], dtype=float).reshape((len(train_data), 1))
+        train_data = np.hstack((train_data, train_err))
+        train_labels = np.array([labels[i] for i in train_set], dtype=int)
+
+        valid_data, vmu, vsig = self.normalize(np.array([stack[i].flux for i in valid_set], dtype=float))
+        # valid_err = ((np.array([stack[i].error for i in valid_set], dtype=float).T - vmu) / vsig).T
+        valid_err = np.array([np.nanstd(stack[i].flux) for i in valid_set], dtype=float).reshape((len(valid_data), 1))
+        valid_data = np.hstack((valid_data, valid_err))
+        valid_labels = np.array([labels[i] for i in valid_set], dtype=int)
+
+        test_data, ttmu, ttsig = self.normalize(np.array([stack[i].flux for i in test_set], dtype=float))
+        # test_err = ((np.array([stack[i].error for i in test_set], dtype=float).T - ttmu) / ttsig).T
+        test_err = np.array([np.nanstd(stack[i].flux) for i in test_set], dtype=float).reshape((len(test_data), 1))
+        test_data = np.hstack((test_data, test_err))
+        test_labels = np.array([labels[i] for i in test_set], dtype=int)
+
+        self.search_model.fit(train_data, train_labels, epochs=epochs, validation_data=(valid_data, valid_labels))
+
+        self.model = self.search_model.best_estimator_.model
+        self.model.evaluate(test_data, test_labels, verbose=2)
+        if save:
+            self.model.save(os.path.join(out_path, save_path))
+        if plot:
+            plot_objective(self.search_model.optimizer_results_[0], dimensions=["learning_rate", "n_layers", "n_neurons"],
+                           n_minimum_search=int(1e8))
+            plt.savefig(os.path.join(out_path, "modelsearch.cornerplot.pdf"), dpi=300, bbox_inches="tight")
+            plt.close()
+            for i in range(3):
+                plot_histogram(self.search_model.optimizer_results_[0], i)
+                plt.savefig(os.path.join(out_path, f"modelsearch.histogram{i}.pdf"), dpi=300, bbox_inches="tight")
+                plt.close()
+
+    @staticmethod
+    def normalize(data):
+        mu = np.nanmean(data, axis=-1)
+        sigma = np.std(data, axis=-1)
+        return ((data.T - mu) / sigma).T, mu, sigma
+
+    def load(self, path):
+        self.model = tf.keras.models.load_model(path)
+
+    def predict(self, test_stack, p_layer="sigmoid", plot=False, out_path=None):
+        # Construct wavelength grid for the inputs
+        wave_grid = np.geomspace(self.min_wave, self.max_wave, self.spec_size)
+        # Resample input spectra onto the proper shaped wavelength grid for input to the neural network
+        test_data, ttmu, ttsig = self.normalize(np.array([
+            maths.spectres(wave_grid, test_stack[i].wave, test_stack[i].flux, test_stack[i].error, fill=np.nan)[0]
+            for i in range(len(test_stack))], dtype=float))
+
+        # test_data, ttmu, ttsig = self.normalize(np.array([test_stack[i].flux for i in range(len(test_stack))], dtype=float))
+        # test_err = ((np.array([test_stack[i].error for i in range(len(test_stack))], dtype=float).T - ttmu) / ttsig).T
+        test_err = np.array([np.nanstd(test_stack[i].flux) for i in range(len(test_stack))], dtype=float).reshape((len(test_data), 1))
+        test_data = np.hstack((test_data, test_err))
+
+        probability_model = tf.keras.Sequential([self.model, tf.keras.layers.Activation(p_layer)])
+        predictions = probability_model.predict(test_data)
+        print(predictions)
+
+        if plot:
+            # fig, ax = plt.subplots(3, 3, sharex=True, sharey=True)
+            # k = 0
+            # for i in range(3):
+            #     for j in range(3):
+            #         if len(test_stack) > k:
+            #             ax[i, j].plot(test_stack[k].wave, test_stack[k].flux, 'k-')
+            #             ax[i, j].fill_between(test_stack[k].wave, (test_stack[k].flux-test_stack[k].error),
+            #                                 (test_stack[k].flux+test_stack[k].error),
+            #                                 color='g', alpha=0.4)
+            #             ax[i, j].set_xlabel(f'Line: {predictions[k, 0]:.2f}')
+            #             if xlim is not None:
+            #                 ax[i, j].set_xlim(*xlim)
+            #             k += 1
+            # plt.savefig('prediction_plot.pdf', dpi=300, bbox_inches='tight')
+            # plt.close()
+            if out_path is None:
+                out_path = "neuralnet_training_data"
+            test_stack.plot_spectra(out_path, backend='pyplot', _range=(self.min_wave, self.max_wave),
+                title_text={label: f"NN Confidence: {predictions[k]}" for k, label in enumerate(test_stack.keys())})
+
+        return predictions

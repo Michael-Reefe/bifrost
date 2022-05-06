@@ -2,6 +2,7 @@ from numba import jit, njit, cfunc, prange
 import numpy as np
 from astropy import constants as c
 
+from scipy import interpolate
 
 C_KMS = c.c.to('km/s').value
 
