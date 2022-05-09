@@ -88,35 +88,9 @@ class NeuralNet:
         model.add(tf.keras.layers.Dense(1))
         model.compile(loss=self.loss(from_logits=True), optimizer=self.optimizer(learning_rate=learning_rate), metrics=self.metrics)
         return model
-
-    def train(self, line="generic_line", target_line=0, size=100_000, epochs=11, out_path="neuralnet_training_data", save=True,
-              save_path="bifrost.neuralnet.h5", plot=True):
-        """
-        The main function for training the neural network to recognize a specific optical coronal line ("line") using simulated data
-
-        :param line: str, iterable
-            The line name(s) to include in the simulated training data
-        :param target_line: int
-            The index of which line in the "line" argument is the line to train the neural network to detect. Default = 0.
-        :param size: int
-            The size of the simulated dataset. Default = 100_000.
-        :param epochs: int
-            The number of epochs to train the data for. Default = 11.
-        :param out_path: str
-            The output path for saving the neural network h5 file, or any plots. Default = 'neuralnet_training_data'
-        :param save: bool
-            Whether or not to save the trained network as an h5 file. Default = True.
-        :param save_path: str
-            The name of the h5 file to be saved if save=True. Default = 'bifrost.neuralnet.h5'
-        :param plot: bool
-            Whether or not to plot a subset of the simulated training data (100). Default = True.
-        :return None:
-        """
-
+    
+    def _get_wave_limits(self, line, target_line=0, size=100_000):
         training_parameters = NeuralNet.config["training_parameters"]
-        # Make RNG seeds
-        power = int(np.log10(size))
-        rng_seeds = np.random.randint(int(10**power), int(10**(power+1)-1), size)
 
         # Get shape for outputs based on wavelength
         if type(line) in (str, np.str_):
@@ -149,6 +123,40 @@ class NeuralNet:
             self.max_wave = np.max(wavelength) + 50
         if self.spec_size is None:
             self.spec_size = int(np.max(wavelength) - np.min(wavelength) + 101)
+        
+        return line, wavelength, SHAPE
+
+
+    def train(self, line="generic_line", target_line=0, size=100_000, epochs=11, out_path="neuralnet_training_data", save=True,
+              save_path="bifrost.neuralnet.h5", plot=True):
+        """
+        The main function for training the neural network to recognize a specific optical coronal line ("line") using simulated data
+
+        :param line: str, iterable
+            The line name(s) to include in the simulated training data
+        :param target_line: int
+            The index of which line in the "line" argument is the line to train the neural network to detect. Default = 0.
+        :param size: int
+            The size of the simulated dataset. Default = 100_000.
+        :param epochs: int
+            The number of epochs to train the data for. Default = 11.
+        :param out_path: str
+            The output path for saving the neural network h5 file, or any plots. Default = 'neuralnet_training_data'
+        :param save: bool
+            Whether or not to save the trained network as an h5 file. Default = True.
+        :param save_path: str
+            The name of the h5 file to be saved if save=True. Default = 'bifrost.neuralnet.h5'
+        :param plot: bool
+            Whether or not to plot a subset of the simulated training data (100). Default = True.
+        :return None:
+        """
+
+        training_parameters = NeuralNet.config["training_parameters"]
+        # Make RNG seeds
+        power = int(np.log10(size))
+        rng_seeds = np.random.randint(int(10**power), int(10**(power+1)-1), size)
+
+        line, wavelength, SHAPE = self._get_wave_limits(line, target_line, size)
 
         # Initialize output parameters, baselines, and noise
         output_parameters = {}
@@ -333,7 +341,7 @@ class NeuralNet:
         sigma = np.std(data, axis=-1)
         return ((data.T - mu) / sigma).T, mu, sigma
 
-    def load(self, path):
+    def load(self, path, line, target_line=0):
         """
         Load an already-trained keras model into the neural network via an h5 file.
 
@@ -341,6 +349,7 @@ class NeuralNet:
             The path to the h5 file to load.
         :return None:
         """
+        self._get_wave_limits(line, target_line, size=100_000)
         self.model = tf.keras.models.load_model(path)
 
     def predict(self, test_stack, p_layer="sigmoid", plot=False, out_path=None):
