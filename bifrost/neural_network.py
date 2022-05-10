@@ -379,6 +379,9 @@ class NeuralNet:
         test_err = np.array([np.nanstd(test_stack[i].flux) for i in range(len(test_stack))], dtype=float).reshape((len(test_data), 1))
         test_data = np.hstack((test_data, test_err))
 
+        # Make sure there are no nans or infs so that the neural net still works
+        test_data[~np.isfinite(test_data)] = np.nanmedian(test_data)
+
         probability_model = tf.keras.Sequential([self.model, tf.keras.layers.Activation(p_layer)])
         predictions = probability_model.predict(test_data)
         print(predictions)
