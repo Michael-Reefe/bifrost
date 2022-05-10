@@ -2137,7 +2137,7 @@ class Stack(Spectra):
         return stacked_flux, stacked_err
 
     @utils.timer(name='Line Flux Integration')
-    def calc_line_flux_ratios(self, line, dw=5, tag='', sky_penalty=True, save=False, conf=None, path=''):
+    def calc_line_flux_ratios(self, line, dw=5, tag='', sky_penalty=False, save=False, conf=None, path=''):
         """
         Calculate the F-number of each spectrum: F = mean flux / RMS of the surrounding spectrum.
 
