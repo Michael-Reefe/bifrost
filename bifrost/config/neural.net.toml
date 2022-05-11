@@ -70,7 +70,7 @@ max = 3.0
 [training_parameters.generic_line.fwhm]
 dist = "uniform"
 min = 10
-max = 800
+max = 400
 [training_parameters.generic_line.voff]
 dist = "normal"  # For the normal distribution, "mean" and "std" keywords are required
 mean = 0
@@ -154,7 +154,7 @@ max = 3.0
 [training_parameters.FeXI_7892.fwhm]
 dist = "uniform"
 min = 10
-max = 800
+max = 400
 [training_parameters.FeXI_7892.voff]
 dist = "normal"
 mean = 0
@@ -185,7 +185,7 @@ max = 3.0
 [training_parameters.SXII_7609.fwhm]
 dist = "uniform"
 min = 10
-max = 800
+max = 400
 [training_parameters.SXII_7609.voff]
 dist = "normal"
 mean = 0
@@ -216,7 +216,7 @@ max = 3.0
 [training_parameters.FeX_6374.fwhm]
 dist = "uniform"
 min = 10
-max = 800
+max = 400
 [training_parameters.FeX_6374.voff]
 dist = "normal"
 mean = 0
@@ -247,7 +247,7 @@ max = 3.0
 [training_parameters.FeVII_6087.fwhm]
 dist = "uniform"
 min = 10
-max = 800
+max = 400
 [training_parameters.FeVII_6087.voff]
 dist = "normal"
 mean = 0
@@ -303,7 +303,7 @@ max = 3.0
 [training_parameters.ArX_5533.fwhm]
 dist = "uniform"
 min = 10
-max = 800
+max = 400
 [training_parameters.ArX_5533.voff]
 dist = "normal"
 mean = 0
@@ -334,7 +334,7 @@ max = 3.0
 [training_parameters.FeVI_5335.fwhm]
 dist = "uniform"
 min = 10
-max = 800
+max = 400
 [training_parameters.FeVI_5335.voff]
 dist = "normal"
 mean = 0
@@ -365,7 +365,7 @@ max = 3.0
 [training_parameters.CaV_5309.fwhm]
 dist = "uniform"
 min = 10
-max = 800
+max = 400
 [training_parameters.CaV_5309.voff]
 dist = "normal"
 mean = 0
@@ -396,7 +396,7 @@ max = 3.0
 [training_parameters.FeXIV_5303.fwhm]
 dist = "uniform"
 min = 10
-max = 800
+max = 400
 [training_parameters.FeXIV_5303.voff]
 dist = "normal"
 mean = 0
@@ -427,7 +427,7 @@ max = 3.0
 [training_parameters.FeVII_5276.fwhm]
 dist = "uniform"
 min = 10
-max = 800
+max = 400
 [training_parameters.FeVII_5276.voff]
 dist = "normal"
 mean = 0
@@ -458,7 +458,7 @@ max = 3.0
 [training_parameters.FeVI_5176.fwhm]
 dist = "uniform"
 min = 10
-max = 800
+max = 400
 [training_parameters.FeVI_5176.voff]
 dist = "normal"
 mean = 0
@@ -489,7 +489,7 @@ max = 3.0
 [training_parameters.FeVII_5159.fwhm]
 dist = "uniform"
 min = 10
-max = 800
+max = 400
 [training_parameters.FeVII_5159.voff]
 dist = "normal"
 mean = 0
@@ -520,7 +520,7 @@ max = 3.0
 [training_parameters.FeVI_5146.fwhm]
 dist = "uniform"
 min = 10
-max = 800
+max = 400
 [training_parameters.FeVI_5146.voff]
 dist = "normal"
 mean = 0
@@ -551,7 +551,7 @@ max = 3.0
 [training_parameters.FeVII_4893.fwhm]
 dist = "uniform"
 min = 10
-max = 800
+max = 400
 [training_parameters.FeVII_4893.voff]
 dist = "normal"
 mean = 0
@@ -582,7 +582,7 @@ max = 3.0
 [training_parameters.FeV_4181.fwhm]
 dist = "uniform"
 min = 10
-max = 800
+max = 400
 [training_parameters.FeV_4181.voff]
 dist = "normal"
 mean = 0
@@ -613,7 +613,7 @@ max = 3.0
 [training_parameters.FeV_3891.fwhm]
 dist = "uniform"
 min = 10
-max = 800
+max = 400
 [training_parameters.FeV_3891.voff]
 dist = "normal"
 mean = 0
@@ -669,7 +669,7 @@ max = 3.0
 [training_parameters.FeVII_3759.fwhm]
 dist = "uniform"
 min = 10
-max = 800
+max = 400
 [training_parameters.FeVII_3759.voff]
 dist = "normal"
 mean = 0
@@ -700,7 +700,7 @@ max = 3.0
 [training_parameters.NeV_3426.fwhm]
 dist = "uniform"
 min = 10
-max = 800
+max = 400
 [training_parameters.NeV_3426.voff]
 dist = "normal"
 mean = 0
