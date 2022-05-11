@@ -2137,18 +2137,17 @@ class Stack(Spectra):
         return stacked_flux, stacked_err
 
     @utils.timer(name='Line Flux Integration')
-    def calc_line_flux_ratios(self, line, dw=5, tag='', sky_penalty=False, save=False, conf=None, path=''):
+    def calc_line_flux_ratios(self, line, dw=5, tag='', sky_lines=None, sky_penalty=False, save=False, conf=None, path=''):
         """
         Calculate the F-number of each spectrum: F = mean flux / RMS of the surrounding spectrum.
-
         :param line: float, int
             The center wavelength at which to integrate (angstroms).
         :param dw: float, int
             The distance to the left/right of the center wavelength to integrate (angstroms).
         :param tag: string
             An optional tag string to add to the end of saved file names.
-        :param sky_penalty: bool
-            Whether to subtract a penalty from the F ratio based on the sky line flux.
+        :param sky_lines: optional, list
+            Wavelengths of sky lines to watch out for -- flag if the line is close to a sky line.
         :param save: boolean
             If True, saves the line flux ratios as a toml file.
         :param conf: str
@@ -2159,8 +2158,8 @@ class Stack(Spectra):
             Dictionary of keys: spectra names, and values: tuple(integrated flux, error) / stacked spectrum integrated
             flux.
         """
-        # if sky_lines is None:
-        #     sky_lines = [5578.5, 5894.6, 6301.7, 7246.0]
+        if sky_lines is None:
+            sky_lines = [5578.5, 5894.6, 6301.7, 7246.0]
         out = {}
         confs = {}
         info = {}
@@ -2186,10 +2185,6 @@ class Stack(Spectra):
             _wl += 55
         elif 5719 < line < 5721:
             _wr += 30
-        elif 3890 < line < 3892:
-            _wl += 10
-        elif 3838 < line < 3840:
-            _wr -= 20
         for i in range_:
             # Define wavelength windows
             window_center = (self[i].wave > line - dw) & (self[i].wave < line + dw)
@@ -2241,6 +2236,11 @@ class Stack(Spectra):
             # pixels = len(cont) + 1 if np.diff(npix)[-1] in np.diff(npix)[cont] else len(cont)
             goodpix = [] if len(npix) == 0 else npix[np.concatenate((cont, [-1]))]
             info[self[i].name]['npix'] = len(goodpix)
+            for _line in sky_lines:
+                rest = maths.cosmological_redshift(_line, self[i].redshift)
+                info[self[i].name][f'sky_flag_{_line}'] = 1 if np.abs(rest - line) <= 2*dw else 0
+            if conf:
+                confs[self[i].name] = self[i].data[conf]
 
             if sky_penalty and self[i].sky is not None:
                 # Repeat the F-ratio procedure for the sky flux
