@@ -390,7 +390,7 @@ class NeuralNet:
             if out_path is None:
                 out_path = "neuralnet_training_data"
             test_stack.plot_spectra(out_path, backend='pyplot', _range=(self.min_wave, self.max_wave),
-                spectra=np.where((predictions > 0.9999) | (predictions < 1e-10))[0],  # only plot the really confident spectra
+                spectra=list(test_stack.keys())[np.where((predictions > 0.9999) | (predictions < 1e-5))[0]],  # only plot the really confident spectra
                 title_text={label: f"NN Confidence: {predictions[k]}" for k, label in enumerate(test_stack.keys())})
 
         return predictions
