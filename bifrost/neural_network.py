@@ -47,7 +47,7 @@ class NeuralNet:
         """
 
         param_distribs = {
-            "n_layers": Integer(1, 6, prior="uniform"),
+            "n_layers": Integer(2, 6, prior="uniform"),
             "n_neurons": Integer(0, 100, prior="uniform"),
             "learning_rate": Real(1e-10, 1e-1, prior="log-uniform")
         }
@@ -280,7 +280,7 @@ class NeuralNet:
         if plot:
             stack.plot_spectra(out_path, backend='pyplot', spectra=list(stack.keys())[0:100], 
                             _range=(self.min_wave, self.max_wave), normalized=True,
-                            ylim=(0,5), title_text={label: f"Line: {labels[i]}, SNR: {output_parameters['amp'][i, target_line]/output_parameters['noise'][i]:.2f}, "
+                            ylim=(-2,5), title_text={label: f"Line: {labels[i]}, SNR: {output_parameters['amp'][i, target_line]/output_parameters['noise'][i]:.2f}, "
                             f"Amp: {output_parameters['amp'][i, target_line]:.2f}, Noise: {output_parameters['noise'][i]:.2f}" for i, label in enumerate(stack)})
 
         # Split data into train, validation, and test sets
@@ -378,7 +378,10 @@ class NeuralNet:
         # test_data = np.hstack((test_data, test_err))
 
         # Make sure there are no nans or infs so that the neural net still works
-        test_data[~np.isfinite(test_data)] = np.nanmedian(test_data)
+        if np.isfinite(np.nanmedian(test_data)):
+            test_data[~np.isfinite(test_data)] = np.nanmedian(test_data)
+        else:
+            test_data[~np.isfinite(test_data)] = 0.
 
         probability_model = tf.keras.Sequential([self.model, tf.keras.layers.Activation(p_layer)])
         predictions = probability_model.predict(test_data)
@@ -387,7 +390,8 @@ class NeuralNet:
         if plot:
             if out_path is None:
                 out_path = "neuralnet_training_data"
-            test_stack.plot_spectra(out_path, backend='pyplot', _range=(self.min_wave, self.max_wave),
+            test_stack.plot_spectra(out_path, backend='pyplot',
+                _range=(self.min_wave, self.max_wave), ylim=(-2,5),
                 spectra=np.asarray(list(test_stack.keys()))[np.where((predictions > 0.9999) | (predictions < 1e-5))[0]],  # only plot the really confident spectra
                 title_text={label: f"NN Confidence: {predictions[k]}" for k, label in enumerate(test_stack.keys())},
                 normalized=True)

@@ -299,6 +299,16 @@ class Spectrum:
             sigma = np.nanstd(spectrum)
             spectrum = (spectrum - mu) / sigma
             error = error / sigma
+        
+        bad = ~np.isfinite(spectrum)
+        if np.isfinite(np.nanmedian(spectrum)):
+            spectrum[bad] = np.nanmedian(spectrum)
+        else:
+            spectrum[bad] = 0. if normalized else 1.
+        if np.isfinite(np.nanmedian(error)):
+            error[bad] = np.nanmedian(error)
+        else:
+            error[bad] = 1.
 
         # Standard matplotlib backend (non-interactive)
         if backend == 'pyplot':
@@ -336,6 +346,15 @@ class Spectrum:
                         sigmi = np.nanstd(speci)
                         speci = (speci - mui) / sigmi
                         erri = erri / sigmi
+                    bad = ~np.isfinite(speci)
+                    if np.isfinite(np.nanmedian(speci)):
+                        speci[bad] = np.nanmedian(speci)
+                    else:
+                        speci[bad] = 0. if normalized else 1.
+                    if np.isfinite(np.nanmedian(erri)):
+                        erri[bad] = np.nanmedian(erri)
+                    else:
+                        erri[bad] = 1.
                     ax.plot(wavei, speci, '-', lw=.5, label=overlay.name)
                 ax.legend()
             else:
@@ -445,6 +464,15 @@ class Spectrum:
                         sigmi = np.nanstd(speci)
                         speci = (speci - mui) / sigmi
                         erri = erri / sigmi
+                    bad = ~np.isfinite(speci)
+                    if np.isfinite(np.nanmedian(speci)):
+                        speci[bad] = np.nanmedian(speci)
+                    else:
+                        speci[bad] = 0. if normalized else 1.
+                    if np.isfinite(np.nanmedian(erri)):
+                        erri[bad] = np.nanmedian(erri)
+                    else:
+                        erri[bad] = 1.
                     good = np.where(np.isfinite(speci) & np.isfinite(erri))[0]
                     fig.add_trace(plotly.graph_objects.Scatter(x=wavei, y=speci, line=dict(color=colorlist[i % len(colorlist)], width=linewidth),
                                                                name=overlay.name + ' data', showlegend=True))
