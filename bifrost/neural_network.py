@@ -47,7 +47,8 @@ class NeuralNet:
         """
 
         param_distribs = {
-            "n_layers": Integer(2, 6, prior="uniform"),
+            # Minimum of 3 dense layers (not counting the input and activation layers)
+            "n_layers": Integer(3, 6, prior="uniform"),
             "n_neurons": Integer(0, 100, prior="uniform"),
             "learning_rate": Real(1e-10, 1e-1, prior="log-uniform")
         }
@@ -392,7 +393,7 @@ class NeuralNet:
                 out_path = "neuralnet_training_data"
             test_stack.plot_spectra(out_path, backend='pyplot',
                 _range=(self.min_wave, self.max_wave), ylim=(-2,5),
-                spectra=np.asarray(list(test_stack.keys()))[np.where((predictions > 0.9999) | (predictions < 1e-5))[0]],  # only plot the really confident spectra
+                spectra=np.asarray(list(test_stack.keys()))[np.where(predictions > 0.9999)[0]],  # only plot the really confident spectra
                 title_text={label: f"NN Confidence: {predictions[k]}" for k, label in enumerate(test_stack.keys())},
                 normalized=True)
 
