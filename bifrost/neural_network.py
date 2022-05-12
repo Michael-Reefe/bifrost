@@ -379,10 +379,11 @@ class NeuralNet:
         # test_data = np.hstack((test_data, test_err))
 
         # Make sure there are no nans or infs so that the neural net still works
-        if np.isfinite(np.nanmedian(test_data)):
-            test_data[~np.isfinite(test_data)] = np.nanmedian(test_data)
-        else:
-            test_data[~np.isfinite(test_data)] = 0.
+        for i in range(test_data.shape[0]):
+            if np.isfinite(np.nanmedian(test_data[i, :])):
+                test_data[i, ~np.isfinite(test_data[i, :])] = np.nanmedian(test_data[i, :])
+            else:
+                test_data[i, :] = 0.
 
         probability_model = tf.keras.Sequential([self.model, tf.keras.layers.Activation(p_layer)])
         predictions = probability_model.predict(test_data)
@@ -393,7 +394,7 @@ class NeuralNet:
                 out_path = "neuralnet_training_data"
             test_stack.plot_spectra(out_path, backend='pyplot',
                 _range=(self.min_wave, self.max_wave), ylim=(-2,5),
-                spectra=np.asarray(list(test_stack.keys()))[np.where(predictions > 0.9999)[0]],  # only plot the really confident spectra
+                spectra=np.asarray(list(test_stack.keys()))[np.where(predictions > 0.99)[0]],  # only plot the really confident spectra
                 title_text={label: f"NN Confidence: {predictions[k]}" for k, label in enumerate(test_stack.keys())},
                 normalized=True)
 
