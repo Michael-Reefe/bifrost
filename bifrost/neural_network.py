@@ -62,7 +62,7 @@ class NeuralNet:
         self.spec_size = spec_size
         # Number of extra parameters to add to input data aside from flux:
         # 1. RMS of the flux
-        self.n_extra_params = 1
+        self.n_extra_params = 0
         # Model hyperparameters
         self.loss = loss
         self.optimizer = optimizer
@@ -279,7 +279,7 @@ class NeuralNet:
         # For debugging purposes:
         if plot:
             stack.plot_spectra(out_path, backend='pyplot', spectra=list(stack.keys())[0:100], 
-                            _range=(self.min_wave, self.max_wave), 
+                            _range=(self.min_wave, self.max_wave), normalized=True,
                             ylim=(0,5), title_text={label: f"Line: {labels[i]}, SNR: {output_parameters['amp'][i, target_line]/output_parameters['noise'][i]:.2f}, "
                             f"Amp: {output_parameters['amp'][i, target_line]:.2f}, Noise: {output_parameters['noise'][i]:.2f}" for i, label in enumerate(stack)})
 
@@ -294,21 +294,18 @@ class NeuralNet:
 
         # Resample each spectrum onto full_wave_grid, preserving flux and error
         train_data, tmu, tsig = self.normalize(np.array([stack[i].flux for i in train_set], dtype=float))
-        # train_err = ((np.array([stack[i].error for i in train_set], dtype=float).T - tmu) / tsig).T
-        train_err = np.array([np.nanstd(stack[i].flux) for i in train_set], dtype=float).reshape((len(train_data), 1))
-        train_data = np.hstack((train_data, train_err))
+        # train_err = np.array([np.nanstd(stack[i].flux) for i in train_set], dtype=float).reshape((len(train_data), 1))
+        # train_data = np.hstack((train_data, train_err))
         train_labels = np.array([labels[i] for i in train_set], dtype=int)
 
         valid_data, vmu, vsig = self.normalize(np.array([stack[i].flux for i in valid_set], dtype=float))
-        # valid_err = ((np.array([stack[i].error for i in valid_set], dtype=float).T - vmu) / vsig).T
-        valid_err = np.array([np.nanstd(stack[i].flux) for i in valid_set], dtype=float).reshape((len(valid_data), 1))
-        valid_data = np.hstack((valid_data, valid_err))
+        # valid_err = np.array([np.nanstd(stack[i].flux) for i in valid_set], dtype=float).reshape((len(valid_data), 1))
+        # valid_data = np.hstack((valid_data, valid_err))
         valid_labels = np.array([labels[i] for i in valid_set], dtype=int)
 
         test_data, ttmu, ttsig = self.normalize(np.array([stack[i].flux for i in test_set], dtype=float))
-        # test_err = ((np.array([stack[i].error for i in test_set], dtype=float).T - ttmu) / ttsig).T
-        test_err = np.array([np.nanstd(stack[i].flux) for i in test_set], dtype=float).reshape((len(test_data), 1))
-        test_data = np.hstack((test_data, test_err))
+        # test_err = np.array([np.nanstd(stack[i].flux) for i in test_set], dtype=float).reshape((len(test_data), 1))
+        # test_data = np.hstack((test_data, test_err))
         test_labels = np.array([labels[i] for i in test_set], dtype=int)
 
         self.search_model.fit(train_data, train_labels, epochs=epochs, validation_data=(valid_data, valid_labels))
@@ -338,7 +335,7 @@ class NeuralNet:
             The normalized data.
         """
         mu = np.nanmean(data, axis=-1)
-        sigma = np.std(data, axis=-1)
+        sigma = np.nanstd(data, axis=-1)
         return ((data.T - mu) / sigma).T, mu, sigma
 
     def load(self, path, line, target_line=0):
@@ -376,8 +373,9 @@ class NeuralNet:
 
         # test_data, ttmu, ttsig = self.normalize(np.array([test_stack[i].flux for i in range(len(test_stack))], dtype=float))
         # test_err = ((np.array([test_stack[i].error for i in range(len(test_stack))], dtype=float).T - ttmu) / ttsig).T
-        test_err = np.array([np.nanstd(test_stack[i].flux) for i in range(len(test_stack))], dtype=float).reshape((len(test_data), 1))
-        test_data = np.hstack((test_data, test_err))
+
+        # test_err = np.array([np.nanstd(test_stack[i].flux) for i in range(len(test_stack))], dtype=float).reshape((len(test_data), 1))
+        # test_data = np.hstack((test_data, test_err))
 
         # Make sure there are no nans or infs so that the neural net still works
         test_data[~np.isfinite(test_data)] = np.nanmedian(test_data)
@@ -391,6 +389,7 @@ class NeuralNet:
                 out_path = "neuralnet_training_data"
             test_stack.plot_spectra(out_path, backend='pyplot', _range=(self.min_wave, self.max_wave),
                 spectra=np.asarray(list(test_stack.keys()))[np.where((predictions > 0.9999) | (predictions < 1e-5))[0]],  # only plot the really confident spectra
-                title_text={label: f"NN Confidence: {predictions[k]}" for k, label in enumerate(test_stack.keys())})
+                title_text={label: f"NN Confidence: {predictions[k]}" for k, label in enumerate(test_stack.keys())},
+                normalized=True)
 
         return predictions

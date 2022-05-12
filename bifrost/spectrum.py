@@ -229,7 +229,7 @@ class Spectrum:
         return self.data["agn_class"]
 
     def plot(self, convolve_width=0, line_labels=True, emline_color="rebeccapurple", absorp_color="darkgoldenrod", cline_color="cyan",
-             overwrite=False, fname=None, backend='plotly', _range=None, ylim=None, title_text=None,
+             overwrite=False, fname=None, backend='plotly', _range=None, ylim=None, title_text=None, normalized=False,
              plot_model=None, shade_reg=None, overlays=None):
         """
         Plot the spectrum.
@@ -257,6 +257,8 @@ class Spectrum:
             Limits on the y-data between two fluxes.
         :param title_text: optional, str
             Text to append to the title of the plot.
+        :param normalized: bool
+            Whether or not to normalize the flux before plotting.
         :param plot_model: optional, tuple
             A tuple of two strings corresponding to keys for the data dict to plot x and y data overtop of the spectrum.
         :param shade_reg: optional, list
@@ -291,6 +293,12 @@ class Spectrum:
             error = error[good]
         else:
             wave = self.wave
+        
+        if normalized:
+            mu = np.nanmean(spectrum)
+            sigma = np.nanstd(spectrum)
+            spectrum = (spectrum - mu) / sigma
+            error = error / sigma
 
         # Standard matplotlib backend (non-interactive)
         if backend == 'pyplot':
@@ -323,6 +331,11 @@ class Spectrum:
                         erri = erri[good]
                     else:
                         wavei = overlay.wave
+                    if normalized:
+                        mui = np.nanmean(speci)
+                        sigmi = np.nanstd(speci)
+                        speci = (speci - mui) / sigmi
+                        erri = erri / sigmi
                     ax.plot(wavei, speci, '-', lw=.5, label=overlay.name)
                 ax.legend()
             else:
@@ -357,7 +370,7 @@ class Spectrum:
             # Set up axis labels and formatting
             fontsize = 20
             ax.set_xlabel(r'$\lambda_{\rm{rest}}$ ($\rm{\AA}$)', fontsize=fontsize)
-            if not self.normalized:
+            if not normalized:
                 ax.set_ylabel(r'$f_\lambda$ ($10^{-17}$ erg cm$^{-2}$ s$^{-1}$ $\rm{\AA}^{-1}$)', fontsize=fontsize)
             else:
                 ax.set_ylabel(r'$f_\lambda$ (normalized)', fontsize=fontsize)
@@ -427,6 +440,11 @@ class Spectrum:
                         erri = erri[good]
                     else:
                         wavei = overlay.wave
+                    if normalized:
+                        mui = np.nanmean(speci)
+                        sigmi = np.nanstd(speci)
+                        speci = (speci - mui) / sigmi
+                        erri = erri / sigmi
                     good = np.where(np.isfinite(speci) & np.isfinite(erri))[0]
                     fig.add_trace(plotly.graph_objects.Scatter(x=wavei, y=speci, line=dict(color=colorlist[i % len(colorlist)], width=linewidth),
                                                                name=overlay.name + ' data', showlegend=True))
@@ -467,7 +485,7 @@ class Spectrum:
                 for line in abslines:
                     fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#d1c779')
 
-            if not self.normalized:
+            if not normalized:
                 y_title = '$f_\\lambda\\ (10^{-17} {\\rm erg} {\\rm s}^{-1} {\\rm cm}^{-2} Å^{-1})$'
             else:
                 y_title = '$f_\\lambda\\ ({\\rm normalized})$'
@@ -943,7 +961,7 @@ class Spectra(dict):
                 self[item].apply_corrections(r_v=r_vi)
 
     def plot_spectra(self, fname_root, spectra='all', _range=None, ylim=None, title_text=None, backend='plotly',
-                     plot_model=None, f=None, shade_reg=None):
+                     plot_model=None, f=None, normalized=False, shade_reg=None):
         """
         Plot a series of spectra from the dictionary.
 
@@ -964,6 +982,8 @@ class Spectra(dict):
             A tuple of two strings corresponding to keys for the data dict to plot x and y data overtop of the spectrum.
         :param f: optional, list
             A list containing values corresponding to each plot to be appended to the beginning of the file names.
+        :param normalized: bool
+            Whether or not to normalize the flux before plotting.
         :param shade_reg: list
             A list of tuples containing left and right boundaries over which to shade in the plot.
         :return None:
@@ -987,7 +1007,7 @@ class Spectra(dict):
                         fname = os.path.join(fname_root, self[item].name.replace(' ', '_') + '.spectrum' + fmt)
                     self[item].plot(fname=fname,
                                     backend=backend, _range=_range, ylim=ylim, title_text=ttl, plot_model=plot_model,
-                                    shade_reg=shade_reg)
+                                    shade_reg=shade_reg, normalized=normalized)
         else:
             for i, item in enumerate(tqdm.tqdm(self)):
                 if item in spectra or i in spectra:
@@ -1006,7 +1026,7 @@ class Spectra(dict):
                         fname = os.path.join(fname_root, self[item].name.replace(' ', '_') + '.spectrum' + fmt)
                     self[item].plot(fname=fname,
                                     backend=backend, _range=_range, ylim=ylim, title_text=ttl, plot_model=plot_model,
-                                    shade_reg=shade_reg)
+                                    shade_reg=shade_reg, normalized=normalized)
 
     def get_spec_index(self, name):
         """
@@ -2489,7 +2509,7 @@ class Stack(Spectra):
                 # fig.write_image(fname.replace('.html', '.pdf'), width=1280, height=540)
 
     def plot_spectra(self, fname_root, spectra='all', _range=None, ylim=None, title_text=None, backend='plotly',
-                     plot_model=None, f=None, shade_reg=None):
+                     plot_model=None, f=None, shade_reg=None, normalized=False):
         """
         Spectra.plot_spectra but incorporates the information from self.normalized.
 
@@ -2512,7 +2532,7 @@ class Stack(Spectra):
                         fname = os.path.join(fname_root, self[item].name.replace(' ', '_') + '.spectrum' + fmt)
                     self[item].plot(fname=fname,
                                     backend=backend, _range=_range, ylim=ylim, title_text=ttl, plot_model=plot_model,
-                                    shade_reg=shade_reg)
+                                    shade_reg=shade_reg, normalized=normalized)
         else:
             for i, item in enumerate(tqdm.tqdm(self)):
                 if item in spectra:
@@ -2531,7 +2551,7 @@ class Stack(Spectra):
                         fname = os.path.join(fname_root, self[item].name.replace(' ', '_') + '.spectrum' + fmt)
                     self[item].plot(fname=fname,
                                     backend=backend, _range=_range, ylim=ylim, title_text=ttl, plot_model=plot_model,
-                                    shade_reg=shade_reg)
+                                    shade_reg=shade_reg, normalized=normalized)
         print('Done.')
 
     def plot_hist(self, fname_base, plot_log=False, backend='plotly'):
