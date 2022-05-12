@@ -367,6 +367,8 @@ class NeuralNet:
         """
         # Construct wavelength grid for the inputs
         wave_grid = np.geomspace(self.min_wave, self.max_wave, self.spec_size)
+        # Correct for redshift and galactic extinction before testing
+        test_stack.correct_spectra()
         # Resample input spectra onto the proper shaped wavelength grid for input to the neural network
         test_data, ttmu, ttsig = self.normalize(np.array([
             maths.spectres(wave_grid, test_stack[i].wave, test_stack[i].flux, test_stack[i].error, fill=np.nan)[0]

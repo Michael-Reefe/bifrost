@@ -284,8 +284,8 @@ class Spectrum:
         else:
             spectrum = self.flux
             error = self.error
-        spectrum[spectrum < 0.] = 0.
-        error[error < 0.] = 0.
+        # spectrum[spectrum < 0.] = 0.
+        # error[error < 0.] = 0.
         if _range:
             good = np.where((_range[0] < self.wave) & (self.wave < _range[1]))[0]
             wave = self.wave[good]
@@ -332,8 +332,8 @@ class Spectrum:
                     else:
                         speci = overlay.flux
                         erri = overlay.error
-                    speci[speci < 0] = 0
-                    erri[erri < 0] = 0
+                    # # speci[speci < 0] = 0
+                    # erri[erri < 0] = 0
                     if _range:
                         good = np.where((_range[0] < overlay.wave) & (overlay.wave < _range[1]))[0]
                         wavei = overlay.wave[good]
@@ -450,8 +450,8 @@ class Spectrum:
                     else:
                         speci = overlay.flux
                         erri = overlay.error
-                    speci[speci < 0] = 0
-                    erri[erri < 0] = 0
+                    # speci[speci < 0] = 0
+                    # erri[erri < 0] = 0
                     if _range:
                         good = np.where((_range[0] < overlay.wave) & (overlay.wave < _range[1]))[0]
                         wavei = overlay.wave[good]
