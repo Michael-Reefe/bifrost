@@ -662,13 +662,15 @@ class Spectrum:
         def nan_helper(spec):
             return np.isnan(spec), lambda q: q.nonzero()[0]
 
-        flux = insert_nans(flux, bad)
-        nans, x = nan_helper(flux)
-        flux[nans] = np.interp(x(nans), x(~nans), flux[~nans])
+        if len(flux[~nans]) > 0:
+            flux = insert_nans(flux, bad)
+            nans, x = nan_helper(flux)
+            flux[nans] = np.interp(x(nans), x(~nans), flux[~nans])
 
-        error = insert_nans(error, bad)
-        nans, x = nan_helper(error)
-        error[nans] = np.interp(x(nans), x(~nans), error[~nans])
+        if len(error[~nans]) > 0:
+            error = insert_nans(error, bad)
+            nans, x = nan_helper(error)
+            error[nans] = np.interp(x(nans), x(~nans), error[~nans])
 
         coord = astropy.coordinates.SkyCoord(ra=ra, dec=dec, unit=(u.deg, u.deg), frame='fk5')
         try:
