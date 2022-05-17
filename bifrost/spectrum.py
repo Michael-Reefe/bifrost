@@ -593,11 +593,15 @@ class Spectrum:
             specobj = copy.deepcopy(hdu[2].data)
             z = specobj['z'][0]
             if name is None:
-                name = specobj['SPECOBJID'][0]
-                if type(name) is str:
-                    name = name.strip()
-                else:
-                    name = str(name)
+                try:
+                    name = specobj['SPECOBJID'][0]
+                    if type(name) is str:
+                        name = name.strip()
+                    else:
+                        name = str(name)
+                except:
+                    # If a SPECOBJID key can't be found, just name from the file name
+                    name = filepath.split(os.sep)[-1].split('.')[0]
 
             hdr = copy.deepcopy(hdu[0].header)
             try:
