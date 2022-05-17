@@ -1,5 +1,6 @@
 # Internal python modules
 import os
+from textwrap import fill
 import time
 import pickle
 import json
@@ -618,7 +619,10 @@ class Spectrum:
             flux = t['flux']
             wave = np.power(10, t['loglam'])
             error = np.sqrt(1 / t['ivar'])
-            sky = t['sky']
+            try:
+                sky = t['sky']
+            except:
+                sky = None
             # and_mask = t['and_mask']
 
             if save_all_data:
