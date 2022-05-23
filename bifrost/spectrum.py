@@ -831,8 +831,8 @@ class Spectrum:
         # Truncate when below the noise level
         rng = np.random.default_rng(seed)
         noise = rng.normal(0, noise_amp, wave.size)
-        flux[flux <= np.nanmedian(noise)] = 0
-        flux[flux > np.nanmedian(noise)] -= np.nanmedian(noise)
+        flux[np.abs(flux) <= np.nanmedian(noise)] = 0
+        flux[np.abs(flux) > np.nanmedian(noise)] -= np.nanmedian(noise)
 
         # Make the ends symmetric
         flux[(flux > -1e-6) & (flux < 1e-6)] = 0
@@ -854,8 +854,8 @@ class Spectrum:
             unique_id = str(uuid.uuid1().hex)
             name = f'{unique_id:s}'
 
-        snr = amp / noise_amp
-
+        snr = np.abs(amp / noise_amp)
+ 
         return cls(wave, flux, error, redshift=0, name=name, snr=snr, amp=amp, noise_amp=noise_amp)
 
     def to_numpy(self, _slice=None):

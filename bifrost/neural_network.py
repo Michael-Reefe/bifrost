@@ -1,10 +1,13 @@
 from multiprocessing.sharedctypes import Value
+from textwrap import fill
 import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
 import toml
 import os
 import numexpr as ne
+import plotly.subplots as psp
+import plotly.graph_objects as pgo
 
 from scipy.stats import reciprocal
 from skopt.searchcv import BayesSearchCV
@@ -108,9 +111,10 @@ class NeuralNet:
                 SHAPE = (size,len(line))
         elif type(line) in (list, np.ndarray):
             for li in line:
-                for lli in training_parameters["line_sets"][li]:
-                    if lli not in line:
-                        line.append(lli)
+                if li in training_parameters["line_sets"]:
+                    for lli in training_parameters["line_sets"][li]:
+                        if lli not in line:
+                            line.append(lli)
             wavelength = [training_parameters[li]['wavelength'] for li in line]
             SHAPE = (size,len(line))
         else:
@@ -252,7 +256,7 @@ class NeuralNet:
 
         # Parameter constraints
         # Ensure certain parameters remain positive
-        output_parameters["amp"][output_parameters["amp"] < 0] = 0
+        # output_parameters["amp"][output_parameters["amp"] < 0] = 0
         if output_parameters["eta"] is not None:
             output_parameters["eta"][output_parameters["eta"] < 0] = 0
             output_parameters["eta"][output_parameters["eta"] > 1] = 1
@@ -273,7 +277,7 @@ class NeuralNet:
             noise_amplitudes=output_parameters["noise"], profiles=profile, min_wave=self.min_wave,
             max_wave=self.max_wave, size=self.spec_size, seeds=rng_seeds, out_path=out_path, progress_bar=True)
 
-        labels = np.where(output_parameters["amp"][:, target_line] / output_parameters["noise"] > NeuralNet.config["SNR"], 1, 0)
+        labels = np.where(np.abs(output_parameters["amp"][:, target_line] / output_parameters["noise"]) > NeuralNet.config["SNR"], 1, 0)
         # labels = np.where(output_parameters["amp"][:, target_line] > 0, 1, 0)
         # labels = np.concatenate(([0] * (size // 2), [1] * (size // 2)))
         # labels = np.array([(0,1)[stack[i].data["snr"][target_line] >= NeuralNet.config["SNR"]] for i in range(len(stack))])
@@ -281,7 +285,7 @@ class NeuralNet:
         if plot:
             stack.plot_spectra(out_path, backend='pyplot', spectra=list(stack.keys())[0:100], 
                             _range=(self.min_wave, self.max_wave), normalized=True,
-                            ylim=(-2,5), title_text={label: f"Line: {labels[i]}, SNR: {output_parameters['amp'][i, target_line]/output_parameters['noise'][i]:.2f}, "
+                            ylim=(-5,5), title_text={label: f"Line: {labels[i]}, SNR: {output_parameters['amp'][i, target_line]/output_parameters['noise'][i]:.2f}, "
                             f"Amp: {output_parameters['amp'][i, target_line]:.2f}, Noise: {output_parameters['noise'][i]:.2f}" for i, label in enumerate(stack)})
 
         # Split data into train, validation, and test sets
@@ -395,9 +399,59 @@ class NeuralNet:
             if out_path is None:
                 out_path = "neuralnet_training_data"
             test_stack.plot_spectra(out_path, backend='pyplot',
-                _range=(self.min_wave, self.max_wave), ylim=(-2,5),
+                _range=(self.min_wave, self.max_wave), ylim=(-5,5),
                 spectra=np.asarray(list(test_stack.keys()))[np.where(predictions > 0.99)[0]],  # only plot the really confident spectra
                 title_text={label: f"NN Confidence: {predictions[k]}" for k, label in enumerate(test_stack.keys())},
                 normalized=True)
 
         return predictions
+    
+    def convolve(self, wave, flux, error, p_layer="sigmoid", plot=True, out_path=None):
+        # Take the neural network as a sliding window along the length of the spectrum,
+        # generating a confidence as a function of wavelength
+
+        # Gather the left and right wavelength bounds for each window
+        slide_size = len(wave)-self.spec_size+1
+        left_wave = np.geomspace(wave[0], wave[-self.spec_size], slide_size)
+        right_wave = np.geomspace(wave[self.spec_size-1], wave[-1], slide_size)
+
+        cwave = np.full(slide_size, fill_value=np.nan)
+        data = np.full((slide_size, self.spec_size), fill_value=np.nan)
+
+        # Go through and resample the flux for each window onto the proper wavelength grid
+        for i in range(slide_size):
+            wgi = np.geomspace(left_wave[i], right_wave[i], self.spec_size)
+            cwave[i] = np.nanmedian(wgi)
+            data[i, :], _, _ = self.normalize(maths.spectres(wgi, wave, flux, error, fill=np.nan)[0])
+            if np.isfinite(np.nanmedian(data[i, :])):
+                data[i, ~np.isfinite(data[i, :])] = np.nanmedian(data[i, :])
+            else:
+                data[i, :] = 0.
+        
+        # Perform the neural network predictions across each window
+        probability_model = tf.keras.Sequential([self.model, tf.keras.layers.Activation(p_layer)])
+        conf = probability_model.predict(data).T[0]
+        cflux = maths.spectres(cwave, wave, flux, error, fill=np.nan)[0]
+        cflux /= np.nanmedian(cflux)
+
+        # Plot the probability vs. wavelength
+        if plot:
+            if out_path is None:
+                out_path = "neuralnet_training_data/nn.convolve.confidence.html"
+            # fig, ax = plt.subplots(figsize=(10,5))
+            # ax.plot(cwave, conf, 'k-')
+            # ax.set_xlabel(r'$\lambda (\AA)$')
+            # ax.set_ylabel(r'Line Confidence')
+            # plt.savefig(os.path.join(out_path, "nn.convolve.confidence.pdf"), dpi=300, bbox_inches='tight')
+            # plt.close()
+            fig = psp.make_subplots(rows=1, cols=1)
+            fig.add_trace(pgo.Scatter(x=cwave, y=conf, line=dict(color='red', width=2), name='Confidence', showlegend=False))
+            fig.add_trace(pgo.Scatter(x=cwave, y=cflux, line=dict(color='black', width=1), name='Flux', showlegend=False))
+            fig.update_layout(
+                xaxis_title=r'$\lambda (\AA)$',
+                yaxis_title=r'Confidence | Flux (normalized)',
+                template='plotly_white'
+            )
+            fig.write_html(out_path, include_mathjax="cdn")
+
+        return cwave, conf

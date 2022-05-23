@@ -61,7 +61,7 @@ NeV_3346 = ["NeV_3426"]
 wavelength = 6000
 detect_ratio = 0.5  # The detection ratio: the fraction of spectra, on average, that will actually contain the line
                     # NOTE: this doesn't have to be realistic; it's just for the training data
-profile = "random"  # Can be random, "random" for Gauss-Hermite, "L" for Lorentzian, or "V" for pseudo-Voigt
+profile = "random"  # Can be random, "GH" for Gauss-Hermite, "L" for Lorentzian, or "V" for pseudo-Voigt
 
 [training_parameters.generic_line.amp]
 dist = "uniform"  # Distribution can be any np.random function (uniform, normal, random, randint, etc.)
@@ -77,16 +77,42 @@ mean = 0
 std = 100
 [training_parameters.generic_line.h3]
 dist = "uniform"
-mean = 0.0
-std = 0.0
+min = 0.0
+max = 0.0
 [training_parameters.generic_line.h4]
 dist = "uniform"
-mean = 0.0
-std = 0.0
+min = 0.0
+max = 0.0
 [training_parameters.generic_line.eta]
 dist = "uniform"
 min = 0.0
 max = 1.0
+
+[training_parameters.metal_abs]
+wavelength = 6000
+detect_ratio = 0.5
+profile = "GH"
+
+[training_parameters.metal_abs.amp]
+dist = "uniform"
+min = -3.0
+max = 0.0
+[training_parameters.metal_abs.fwhm]
+dist = "uniform"
+min = 10
+max = 50
+[training_parameters.metal_abs.voff]
+dist = "normal"  # For the normal distribution, "mean" and "std" keywords are required
+mean = 0
+std = 100
+[training_parameters.metal_abs.h3]
+dist = "uniform"
+min = 0.0
+max = 0.0
+[training_parameters.metal_abs.h4]
+dist = "uniform"
+min = 0.0
+max = 0.0
 
 # Supplementary NON-CORONAL Lines
 # [O I] 6302
