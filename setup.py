@@ -17,7 +17,7 @@ search = re.search(r'__version__\s*=\s*[\'"]([^\'"]*)[\'"]', open('bifrost/__ini
 version = search.group(1)
 
 setuptools.setup(
-    name="bifrost",
+    name="astro-bifrost",
     version=version,
     author="Michael Reefe",
     author_email="michael.reefe8@gmail.com",
