@@ -1,5 +1,6 @@
 # Internal python modules
 import os
+from textwrap import fill
 import time
 import pickle
 import json
@@ -7,6 +8,7 @@ import toml
 import copy
 import gc
 import itertools
+import uuid
 
 # External packages
 import tqdm
@@ -23,6 +25,7 @@ from joblib import Parallel, delayed
 import scipy.optimize
 import scipy.integrate
 import scipy.interpolate
+import scipy.special
 
 import astropy.coordinates
 import astropy.time
@@ -42,10 +45,10 @@ import bifrost.filters as bfilters
 
 
 class Spectrum:
-    __slots__ = ['wave', 'flux', 'error', 'redshift', 'velocity', 'ra', 'dec', 'ebv', 'name', 'output_path',
+    __slots__ = ['wave', 'flux', 'error', 'sky', 'redshift', 'velocity', 'ra', 'dec', 'ebv', 'name', 'output_path',
                  '_corrected', 'data', '_normalized']
 
-    def __init__(self, wave, flux, error, redshift=None, velocity=None, ra=None, dec=None, ebv=None, name='Generic',
+    def __init__(self, wave, flux, error, sky=None, redshift=None, velocity=None, ra=None, dec=None, ebv=None, name='Generic',
                  output_path=None, **data):
         """
         A class containing data and attributes for a single spectrum of an astronomical object.
@@ -86,6 +89,8 @@ class Spectrum:
         self.flux = flux
         # Flux error in 10^-17 * CGS units
         self.error = error
+        # Sky flux in 10^-17 * CGS units
+        self.sky = sky
         # Redshift in units of c
         self.redshift = redshift
         self.velocity = velocity
@@ -225,7 +230,7 @@ class Spectrum:
         return self.data["agn_class"]
 
     def plot(self, convolve_width=0, line_labels=True, emline_color="rebeccapurple", absorp_color="darkgoldenrod", cline_color="cyan",
-             overwrite=False, fname=None, backend='plotly', _range=None, ylim=None, title_text=None,
+             overwrite=False, fname=None, backend='plotly', _range=None, ylim=None, title_text=None, normalized=False,
              plot_model=None, shade_reg=None, overlays=None):
         """
         Plot the spectrum.
@@ -253,6 +258,8 @@ class Spectrum:
             Limits on the y-data between two fluxes.
         :param title_text: optional, str
             Text to append to the title of the plot.
+        :param normalized: bool
+            Whether or not to normalize the flux before plotting.
         :param plot_model: optional, tuple
             A tuple of two strings corresponding to keys for the data dict to plot x and y data overtop of the spectrum.
         :param shade_reg: optional, list
@@ -278,8 +285,8 @@ class Spectrum:
         else:
             spectrum = self.flux
             error = self.error
-        spectrum[spectrum < 0.] = 0.
-        error[error < 0.] = 0.
+        # spectrum[spectrum < 0.] = 0.
+        # error[error < 0.] = 0.
         if _range:
             good = np.where((_range[0] < self.wave) & (self.wave < _range[1]))[0]
             wave = self.wave[good]
@@ -287,6 +294,22 @@ class Spectrum:
             error = error[good]
         else:
             wave = self.wave
+        
+        if normalized:
+            mu = np.nanmean(spectrum)
+            sigma = np.nanstd(spectrum)
+            spectrum = (spectrum - mu) / sigma
+            error = error / sigma
+        
+        bad = ~np.isfinite(spectrum)
+        if np.isfinite(np.nanmedian(spectrum)):
+            spectrum[bad] = np.nanmedian(spectrum)
+        else:
+            spectrum[bad] = 0. if normalized else 1.
+        if np.isfinite(np.nanmedian(error)):
+            error[bad] = np.nanmedian(error)
+        else:
+            error[bad] = 1.
 
         # Standard matplotlib backend (non-interactive)
         if backend == 'pyplot':
@@ -310,8 +333,8 @@ class Spectrum:
                     else:
                         speci = overlay.flux
                         erri = overlay.error
-                    speci[speci < 0] = 0
-                    erri[erri < 0] = 0
+                    # # speci[speci < 0] = 0
+                    # erri[erri < 0] = 0
                     if _range:
                         good = np.where((_range[0] < overlay.wave) & (overlay.wave < _range[1]))[0]
                         wavei = overlay.wave[good]
@@ -319,6 +342,20 @@ class Spectrum:
                         erri = erri[good]
                     else:
                         wavei = overlay.wave
+                    if normalized:
+                        mui = np.nanmean(speci)
+                        sigmi = np.nanstd(speci)
+                        speci = (speci - mui) / sigmi
+                        erri = erri / sigmi
+                    bad = ~np.isfinite(speci)
+                    if np.isfinite(np.nanmedian(speci)):
+                        speci[bad] = np.nanmedian(speci)
+                    else:
+                        speci[bad] = 0. if normalized else 1.
+                    if np.isfinite(np.nanmedian(erri)):
+                        erri[bad] = np.nanmedian(erri)
+                    else:
+                        erri[bad] = 1.
                     ax.plot(wavei, speci, '-', lw=.5, label=overlay.name)
                 ax.legend()
             else:
@@ -353,7 +390,7 @@ class Spectrum:
             # Set up axis labels and formatting
             fontsize = 20
             ax.set_xlabel(r'$\lambda_{\rm{rest}}$ ($\rm{\AA}$)', fontsize=fontsize)
-            if not self.normalized:
+            if not normalized:
                 ax.set_ylabel(r'$f_\lambda$ ($10^{-17}$ erg cm$^{-2}$ s$^{-1}$ $\rm{\AA}^{-1}$)', fontsize=fontsize)
             else:
                 ax.set_ylabel(r'$f_\lambda$ (normalized)', fontsize=fontsize)
@@ -414,8 +451,8 @@ class Spectrum:
                     else:
                         speci = overlay.flux
                         erri = overlay.error
-                    speci[speci < 0] = 0
-                    erri[erri < 0] = 0
+                    # speci[speci < 0] = 0
+                    # erri[erri < 0] = 0
                     if _range:
                         good = np.where((_range[0] < overlay.wave) & (overlay.wave < _range[1]))[0]
                         wavei = overlay.wave[good]
@@ -423,6 +460,20 @@ class Spectrum:
                         erri = erri[good]
                     else:
                         wavei = overlay.wave
+                    if normalized:
+                        mui = np.nanmean(speci)
+                        sigmi = np.nanstd(speci)
+                        speci = (speci - mui) / sigmi
+                        erri = erri / sigmi
+                    bad = ~np.isfinite(speci)
+                    if np.isfinite(np.nanmedian(speci)):
+                        speci[bad] = np.nanmedian(speci)
+                    else:
+                        speci[bad] = 0. if normalized else 1.
+                    if np.isfinite(np.nanmedian(erri)):
+                        erri[bad] = np.nanmedian(erri)
+                    else:
+                        erri[bad] = 1.
                     good = np.where(np.isfinite(speci) & np.isfinite(erri))[0]
                     fig.add_trace(plotly.graph_objects.Scatter(x=wavei, y=speci, line=dict(color=colorlist[i % len(colorlist)], width=linewidth),
                                                                name=overlay.name + ' data', showlegend=True))
@@ -463,7 +514,7 @@ class Spectrum:
                 for line in abslines:
                     fig.add_vline(x=line, line_width=linewidth, line_dash='dash', line_color='#d1c779')
 
-            if not self.normalized:
+            if not normalized:
                 y_title = '$f_\\lambda\\ (10^{-17} {\\rm erg} {\\rm s}^{-1} {\\rm cm}^{-2} Å^{-1})$'
             else:
                 y_title = '$f_\\lambda\\ ({\\rm normalized})$'
@@ -543,11 +594,15 @@ class Spectrum:
             specobj = copy.deepcopy(hdu[2].data)
             z = specobj['z'][0]
             if name is None:
-                name = specobj['SPECOBJID'][0]
-                if type(name) is str:
-                    name = name.strip()
-                else:
-                    name = str(name)
+                try:
+                    name = specobj['SPECOBJID'][0]
+                    if type(name) is str:
+                        name = name.strip()
+                    else:
+                        name = str(name)
+                except:
+                    # If a SPECOBJID key can't be found, just name from the file name
+                    name = filepath.split(os.sep)[-1].split('.')[0]
 
             hdr = copy.deepcopy(hdu[0].header)
             try:
@@ -564,6 +619,10 @@ class Spectrum:
             flux = t['flux']
             wave = np.power(10, t['loglam'])
             error = np.sqrt(1 / t['ivar'])
+            try:
+                sky = t['sky']
+            except:
+                sky = None
             # and_mask = t['and_mask']
 
             if save_all_data:
@@ -574,7 +633,7 @@ class Spectrum:
                     if key not in data_dict.keys() and key not in ('RA', 'DEC'):
                         data_dict[key] = hdr[key]
                 for key in t.names:
-                    if key not in data_dict.keys() and key not in ('flux', 'loglam', 'ivar'):
+                    if key not in data_dict.keys() and key not in ('flux', 'loglam', 'ivar', 'sky'):
                         data_dict[key] = t[key]
                 for key in q.names:
                     if key not in data_dict.keys():
@@ -605,11 +664,13 @@ class Spectrum:
 
         flux = insert_nans(flux, bad)
         nans, x = nan_helper(flux)
-        flux[nans] = np.interp(x(nans), x(~nans), flux[~nans])
+        if len(flux[~nans]) > 0:
+            flux[nans] = np.interp(x(nans), x(~nans), flux[~nans])
 
         error = insert_nans(error, bad)
         nans, x = nan_helper(error)
-        error[nans] = np.interp(x(nans), x(~nans), error[~nans])
+        if len(error[~nans]) > 0:
+            error[nans] = np.interp(x(nans), x(~nans), error[~nans])
 
         coord = astropy.coordinates.SkyCoord(ra=ra, dec=dec, unit=(u.deg, u.deg), frame='fk5')
         try:
@@ -629,82 +690,173 @@ class Spectrum:
             error.byteswap(inplace=True)
             error.dtype = '<f4'
 
-        return cls(wave, flux, error, redshift=z, ra=ra / 15, dec=dec, ebv=ebv, name=name, **data_dict)
+        return cls(wave, flux, error, sky, redshift=z, ra=ra / 15, dec=dec, ebv=ebv, name=name, **data_dict)
+
+    
+    @staticmethod
+    def emission_line(true_line, amp, fwhm, voff, h=None, eta_mix=None, disp_inst=None, min_wave=3000, max_wave=8000, 
+                      size=10_000, profile="GH"):
+
+        # Logarithmically spaced wavelength grid
+        wave = np.geomspace(min_wave, max_wave, size)
+        frac = wave[1]/wave[0]
+
+        # Optionally add some intrinsic dispersion to simulate a real spectrograph
+        # Size of every pixel in angstroms
+        dwave = (frac - 1) * wave
+        # Intrinsic dispersion in pixels per pixel
+        if disp_inst is None:
+            disp_inst = 1 / dwave
+        # FWHM dispersion in angstroms
+        fwhm_inst = 2.3548 * disp_inst * dwave
+
+        # Constant velocity scale per pixel -- which is why we choose a logarithmically spaced grid
+        c = const.c.to('km/s').value
+        velscale = np.log(frac) * c
+
+        # Add instrumental fwhm in quadrature
+        fwhm_interp = scipy.interpolate.interp1d(wave, fwhm_inst, kind='linear', bounds_error=False, fill_value=(1.e-10, 1.e-10))
+        fwhm_inst_kms = (fwhm_interp(true_line) / true_line) * c
+        fwhm0 = np.hypot(fwhm, fwhm_inst_kms)
+
+        # Convert from km/s to pixels
+        fwhm_pix = fwhm0 / velscale
+        sigma = (fwhm0/2.3548) / velscale
+        shift = voff / velscale
+
+        # Convert x from angstroms to pixels
+        x_pix = np.array(range(len(wave)))
+        pix_interp = scipy.interpolate.interp1d(wave, x_pix, kind='linear', bounds_error=False, fill_value=(1.e-10, 1.e-10))
+        center_pix = pix_interp(true_line) + shift
+
+        if profile == 'random':
+            profile = np.random.choice(["GH", "L", "V"])
+
+        if profile in ("GH", "G"):
+            # Calculate moments and normalization constants
+            w = (x_pix - center_pix) / sigma
+            if h is None:
+                h = [0, 0]
+            moments = np.arange(3, len(h) + 3)
+            norm = np.sqrt(scipy.special.factorial(moments)*2**moments)
+            coeff = np.concatenate(([1, 0, 0], h/norm))
+
+            # Combine Gaussian and Hermite profiles
+            flux = 1 / (np.sqrt(2 * np.pi) * sigma) * np.exp(-w**2/2) * np.polynomial.hermite.hermval(w, coeff)
+            flux[flux < 0] = 0
+
+        elif profile == "L":
+            # Calculate Lorentzian profile
+            gamma = 0.5 * fwhm_pix
+            flux = (gamma**2 / (gamma**2 + (x_pix - center_pix)**2))
+
+        elif profile == "V":
+            # Calculate pseudo-Voigt profile -- combination of Gaussian and Lorentzian by some mixing parameter eta
+            w = (x_pix - center_pix) / sigma
+            gauss = 1 / (np.sqrt(2 * np.pi) * sigma) * np.exp(-w**2/2)
+            gamma = 0.5 * fwhm_pix
+            lorentz = 1 / np.pi * gamma / (gamma**2 + (x_pix - center_pix)**2)
+
+            if eta_mix is None:
+                eta_mix = 0.5
+            flux = ((eta_mix * gauss) + ((1 - eta_mix) * lorentz))
+
+        else:
+            raise ValueError(f"Invalid profile type {profile}! Must be one of 'GH', 'G', 'L', or 'V'")
+
+        # Renormalize
+        flux /= np.nanmax(flux)
+        flux *= amp
+
+        return wave, flux
 
     @classmethod
-    def simulated(cls, true_line, wave_range=(-20, 20), rv='random', rv_lim=(-100, 100),
-                  vsini='random', vsini_lim=(0, 500), noise_std='random', noise_std_lim=(0.1, 1), a=1, sigma=0.1,
-                  name='auto', seed=None):
+    def simulated(cls, true_line, baseline, amp, fwhm, voff, alpha=None, h=None, eta_mix=None, noise_amp=None, seed=None,
+                  disp_inst=None, min_wave=3000, max_wave=8000, size=10_000, profile="GH", name=None):
         """
         Create a simulated spectrum object.
 
         :param true_line: float
             The wavelength of the emission line to model, in angstroms.
-        :param wave_range: tuple
-            Range of wavelengths in anstroms to model from the left/right of true_line. Default (-20, 20)
-        :param rv: str, float
-            The radial velocity, in km/s, of redshift (>0 values are away from the observer). If 'random', draws
-            from a uniform distribution limited by rv_lim.
-        :param rv_lim: tuple
-            Lower and upper boundaries on the uniform distribution that rv draws from if it's 'random'.
-            Default (-100, 100)
-        :param vsini: str, float
-            The rotational velocity, in km/s, of redshift (>0 values are away from the observer). If 'random', draws
-            from a uniform distribution limited by vsini_lim.
-        :param vsini_lim: tuple
-            Lower and upper boundaries on the uniform distribution that vsini draws from if it's 'random'.
-            Default (0, 500)
-        :param noise_std: str, float
-            Standard deviation of the noise to be added to the spectrum.  If 'random', draws from a uniform distribution
-            limited by noise_std_lim.
-        :param noise_std_lim: tuple
-            Lower and upper boundaries on the uniform distribution that noise_std draws from if it's 'random'.
-            Default (0.1, 1)
-        :param a: float
-            Amplitude of the Gaussian model for the emission line BEFORE applying rotational broadening. Default 1.
-        :param sigma: float
-            Standard deviation of the Gaussian model for the emission line BEFORE applying rotational broadening.
-            Default 0.1.
-        :param name: str
-            Name of the spectrum.
-        :param seed: int
-            A seed to use in setting random variables, so they may be reproduced.
-        :return: Spectrum
-            The simulated spectrum object.
+        :param baseline: float
+            The baseline flux of the spectrum, in 10^-17 erg/s/cm^2/angstrom.
+        :param amp: float
+            The amplitude of the Gaussian profile, in 10^-17 erg/s/cm^2/angstrom.
+        :param fwhm: float
+            The full-width at half-maximum of the Gaussian profile (h2), in km/s.
+        :param voff: float
+            The velocity offset of the Gaussian profile (h1), in km/s.
+        :param alpha: float
+            Simple power law slope.
+        :param h: array
+            Array of hermite moments for order 3 and higher.
+        :param eta_mix: float
+            Mixing parameter of Pseudo-Voigt profile.
+        :param noise_amp: float, optional
+            Amplitude of random noise to be added, in 10^-17 erg/s/cm^2/angstrom.
+        :param disp_inst: array, optional
+            Intrinsic dispersion in pixels per pixel.
+        :param profile: str, optional
+            The line profile to use - "GH" or "G" for Gauss-Hermite, "L" for lorentzian, "V" for pseudo-Voigt
+        :param min_wave: float
+            Minimum wavelength in the grid.
+        :param max_wave: float
+            Maximum wavelength in the grid.
+        :param size: integer
+            The number of datapoints in the wavelength/pixel grid.
+        :param name: string
+            The name of the spectrum.
         """
-        # Use a seed in case the randomization needs to be the same
+        if type(true_line) in (int, float):
+            wave, flux = cls.emission_line(true_line, amp, fwhm, voff, h, eta_mix, disp_inst, min_wave, max_wave, 
+                          size, profile)
+        elif type(true_line) in (list, np.ndarray):
+            flux = np.zeros(size)
+            # Iterate over any number of potential values for the true wavelength, amplitude, FWHM, etc. to 
+            # create superpositions of many line profiles
+            for ti, ampi, fwhmi, voffi, hi, etai, prfi in zip(true_line, amp, fwhm, voff, h, eta_mix, profile):
+                wave, flux_i = cls.emission_line(ti, ampi, fwhmi, voffi, hi, etai, disp_inst, min_wave, max_wave,
+                                                  size, prfi)
+                flux += flux_i
+        else:
+            raise ValueError("true_line must be one of: int, float, list, np.ndarray")
+
+        # Normalize and apply amplitude
+        # flux = flux / np.nanmax(flux) * amp
+
+        # Add random noise
+        if noise_amp is None:
+            noise_amp = baseline / 100
+
+        # Truncate when below the noise level
         rng = np.random.default_rng(seed)
-        # Wavelength grid
-        wave = np.arange(true_line + wave_range[0] * 2, true_line + wave_range[1] * 2 + 0.1, 1)
+        noise = rng.normal(0, noise_amp, wave.size)
+        flux[np.abs(flux) <= np.nanmedian(noise)] = 0
+        flux[np.abs(flux) > np.nanmedian(noise)] -= np.nanmedian(noise)
 
-        # Apply redshift first to avoid reinterpolating the flux
-        if rv == 'random':
-            rv = rng.uniform(*rv_lim)
-        z = maths.calc_redshift_sqrt(rv)
+        # Make the ends symmetric
+        flux[(flux > -1e-6) & (flux < 1e-6)] = 0
+        flux[0] = flux[1]
+        flux[-1] = flux[-2]
 
-        # First, calculate the perfect idealized (unshifted) spectrum
-        flux = maths.gaussian(wave, a, true_line, sigma) + 1
-
-        # Then apply rotational broadening
-        if vsini == 'random':
-            vsini = rng.uniform(*vsini_lim)
-        flux = fastRotBroad(wave, flux, 0, vsini=vsini)
-
-        _range = np.where((wave >= true_line + wave_range[0]) & (wave <= true_line + wave_range[1]))[0]
-        wave = wave[_range]
-        flux = flux[_range]
-
-        if noise_std == 'random':
-            noise_std = rng.uniform(*noise_std_lim)
-        noise = rng.normal(0, noise_std, wave.size)
+        # Add simulated power law and noise
+        if alpha is None:
+            alpha = 0
+        wave_b = 0.5*(np.nanmax(wave) + np.nanmin(wave))
+        continuum = baseline * (wave / wave_b) ** alpha
+        flux += continuum
         flux += noise
-        error = np.array([np.std(flux - 1)] * len(flux))
-        snr = 1 / np.std(flux - 1)
 
-        if name == 'auto':
-            name = 'Sim_A{:.1f}_s{:d}_{:.3f}_{:.3f}_{:.3f}'.format(a, seed, rv, vsini, noise_std)
+        # Assume ideal uniform error
+        error = np.array([noise_amp] * len(flux))
 
-        return cls(wave, flux, error, redshift=z, name=name, amp=a, sigma=sigma, snr=snr)
+        if name is None:
+            unique_id = str(uuid.uuid1().hex)
+            name = f'{unique_id:s}'
+
+        snr = np.abs(amp / noise_amp)
+ 
+        return cls(wave, flux, error, redshift=0, name=name, snr=snr, amp=amp, noise_amp=noise_amp)
 
     def to_numpy(self, _slice=None):
         # Convert to a lightweight numpy record array, with just wave, flux, and error information
@@ -847,7 +999,7 @@ class Spectra(dict):
                 self[item].apply_corrections(r_v=r_vi)
 
     def plot_spectra(self, fname_root, spectra='all', _range=None, ylim=None, title_text=None, backend='plotly',
-                     plot_model=None, f=None, shade_reg=None):
+                     plot_model=None, f=None, normalized=False, shade_reg=None):
         """
         Plot a series of spectra from the dictionary.
 
@@ -868,6 +1020,8 @@ class Spectra(dict):
             A tuple of two strings corresponding to keys for the data dict to plot x and y data overtop of the spectrum.
         :param f: optional, list
             A list containing values corresponding to each plot to be appended to the beginning of the file names.
+        :param normalized: bool
+            Whether or not to normalize the flux before plotting.
         :param shade_reg: list
             A list of tuples containing left and right boundaries over which to shade in the plot.
         :return None:
@@ -891,10 +1045,10 @@ class Spectra(dict):
                         fname = os.path.join(fname_root, self[item].name.replace(' ', '_') + '.spectrum' + fmt)
                     self[item].plot(fname=fname,
                                     backend=backend, _range=_range, ylim=ylim, title_text=ttl, plot_model=plot_model,
-                                    shade_reg=shade_reg)
+                                    shade_reg=shade_reg, normalized=normalized)
         else:
             for i, item in enumerate(tqdm.tqdm(self)):
-                if item in spectra:
+                if item in spectra or i in spectra:
                     if item not in self or item not in title_text:
                         print(f'WARNING: {item} not found in stack!')
                         continue
@@ -910,7 +1064,7 @@ class Spectra(dict):
                         fname = os.path.join(fname_root, self[item].name.replace(' ', '_') + '.spectrum' + fmt)
                     self[item].plot(fname=fname,
                                     backend=backend, _range=_range, ylim=ylim, title_text=ttl, plot_model=plot_model,
-                                    shade_reg=shade_reg)
+                                    shade_reg=shade_reg, normalized=normalized)
 
     def get_spec_index(self, name):
         """
@@ -943,7 +1097,7 @@ class Spectra(dict):
         t = type(key)
         if t is str or t is np.str_:
             return super().__getitem__(key)
-        elif t is int:
+        elif t is int or t is np.int_:
             return self[list(self.keys())[key]]
         # elif t in (list, tuple, np.ndarray):
         #     if type(key[0]) in (str, np.str, np.str_):
@@ -1211,39 +1365,43 @@ class Stack(Spectra):
 
     @classmethod
     @utils.timer(name='Quick Sim Load')
-    def quick_sim_stack(cls, line, size=10_000, wave_range=(-20, 20), rv='random', rv_lim=(-100, 100), vsini='random',
-                        vsini_lim=(0, 500), noise_std='random', noise_std_lim=(0.1, 1),
-                        amplitudes=None, widths=None,
-                        out_path=None, n_jobs=-1, save_pickle=True, save_json=False, save_toml=False,
-                        _filters=None, seeds=None, progress_bar=False):
+    def quick_sim_stack(cls, line, baselines, amplitudes, widths, voffs, alphas=None, h_moments=None, eta_mixes=None, 
+                        noise_amplitudes=None, seeds=None, disp_insts=None, min_wave=3000, max_wave=8000, size=10_000, 
+                        profiles=None, names=None, out_path=None, n_jobs=-1, save_pickle=True, save_json=False, save_toml=False,
+                        _filters=None, progress_bar=False):
         """
         The main driver for the stacking code.
 
         :param line: float
             Wavelength of the line to generate simulated spectra for.
-        :param size: int
-            The number of randomized simulated spectra to generate and stack.
-        :param wave_range: tuple
-            Range of wavelengths around the line to generate spectra over.
-        :param rv: str, float
-            Radial velocity of simulated spectra.  'random' to make each one random.
-        :param rv_lim: tuple
-            Limits on randomized radial velocities of spectra, in km/s.
-        :param vsini: str, float
-            Rotational velocity of simulated spectra. 'random' to make each one random.
-        :param vsini_lim: tuple
-            Limits on randomized rotational velocities of spectra, in km/s.
-        :param noise_std: str, float
-            The standard deviation of the noise to be injected in the simulated spectra.  'random' to make each one random.
-        :param noise_std_lim: tuple
-            Limits on randomized noise standard deviations of spectra.
+        :param baselines: iterable
+            A list of baseline fluxes for each simulated spectra.  Must match the length of amplitudes, widths, voffs, ...
         :param amplitudes: iterable
-            A list of amplitudes for each simulated spectra.  Must match the length of widths and seeds.  Default is 1.
+            A list of amplitudes for each simulated spectra.  Must match the length of baselines, widths, voffs, ...
         :param widths: iterable
-            A list of widths for each simiulated spectra.  Must match the length of amplitudes and seeds.  Default is 0.1.
+            A list of widths for each simulated spectra.  Must match the length of baselines, amplitudes, voffs, ....
+        :param voffs: iterable
+            A list of velocity offsets for each simulated spectra.  Must match the length of baselines, amplitudes, widths, ...
+        :param alphas: iterable
+            A list of power law slopes for each simulated spectra.  Must match the length of baselines, amplitudes, widths, ...
+        :param h_moments: iterable
+            A list of hermite moments for each simulated spectra of shape  (n x m) for n spectra and m moments
+        :param eta_mixes: iterable
+            A list of eta mixing parameters for each simulated Voigt profile.
+        :param noise_amplitudes: iterable
+            A list of noise amplitudes for each simulated spectra.  Must match the length of amplitudes, widths, voffs, ...
         :param seeds: iterable
-            A list of seeds to use in generating random noise for each spectrum.  Must match the length of amplitudes and
-            widths.  Default is None (random).
+            A list of random number generator seeds for each simulated spectra.  Must match the length of amplitudes, widths, voffs, ...
+        :param min_wave: float
+            Minimum wavelength in the grid.
+        :param max_wave: float
+            Maximum wavelength in the grid.
+        :param size: integer
+            The number of datapoints in the wavelength/pixel grid.
+        :param profiles: iterable or str
+            The profiles of each simulated spectra.  "random" randomizes the profile of each spectrum.
+        :param names: iterable
+            The names of each simulated spectra.
         :param out_path: str
             The output path to save output plots and pickles/jsons to.  Default is "data.stacked.YYYYMMDD_HHMMSS"
         :param n_jobs: int
@@ -1253,12 +1411,17 @@ class Stack(Spectra):
             Whether or not to save the Stack object as a pickle file.  Default is true.
         :param save_json: bool
             Whether or not to save the Stack object as a json file.  Default is false.
+        :param save_toml: bool
+            Whether or not to save the Stack object as a toml file. Default is false.
         :param _filters: str, iterable
             Filter objects to be applied to the Stack.
         :param progress_bar: bool
             If True, shows a progress bar for reading in files.  Default is False.
         :return stack: Stack
             The Stack object.
+
+        If line is a 1D array and amplitudes, widths, and voffs are 2D arrays, this is interpreted as the 2nd dimension being all lines that 
+        are superimposed on the same simulated spectrum; in this case, eta_mixes must be 2D and h_moments must be 3D (n spectra x m lines x p moments)
         """
         # Create output paths
         if not out_path:
@@ -1277,20 +1440,31 @@ class Stack(Spectra):
             filter_list.append(bfilters.Filter.from_str(_filter))
         stack = cls(filters=filter_list, progress_bar=progress_bar)
 
-        def make_spec(A, sigma, seed):
-            ispec = Spectrum.simulated(line, wave_range, rv, rv_lim, vsini, vsini_lim, noise_std,
-                                       noise_std_lim, a=A, sigma=sigma, seed=seed)
-            return ispec
+        SHAPE = (size,) if type(line) in (int, float, np.int_, np.float_) else (size, len(line))
+        if alphas is None:
+            alphas = [None] * len(baselines)
+        if h_moments is None:
+            h_moments = np.full((size,2) if type(line) in (int, float, np.int_, np.float_) else (size,len(line),2), fill_value=np.nan)
+        if eta_mixes is None:
+            eta_mixes = np.full(SHAPE, fill_value=np.nan)
+        if disp_insts is None:
+            disp_insts = [None] * len(baselines)
+        if noise_amplitudes is None:
+            noise_amplitudes = [None] * len(baselines)
+        if names is None:
+            names = [None] * len(baselines)
+        if seeds is None:
+            seeds = [None] * len(baselines)
+
+        def make_spec(baseline, amp, fwhm, voff, alpha, h, eta_mix, noise_amp, seed, disp_inst, name):
+            return Spectrum.simulated(line, baseline, amp, fwhm, voff, alpha, h, eta_mix, noise_amp, seed, disp_inst,
+                                      min_wave, max_wave, size, profiles, name)
 
         print('Generating spectra...')
-        if amplitudes is None:
-            amplitudes = np.ones(size)
-        if widths is None:
-            widths = np.ones(size) * 0.1
-        if seeds is None:
-            seeds = [None] * size
-        range_ = tqdm.tqdm(zip(amplitudes, widths, seeds)) if progress_bar else zip(amplitudes, widths, seeds)
-        specs = Parallel(n_jobs=n_jobs)(delayed(make_spec)(ai, wi, si) for ai, wi, si in range_)
+        range_ = tqdm.trange(len(baselines)) if progress_bar else range(len(baselines))
+        specs = Parallel(n_jobs=n_jobs)(delayed(make_spec)(baselines[i], amplitudes[i, ...], widths[i, ...], voffs[i, ...], 
+                                        alphas[i], h_moments[i, ...], eta_mixes[i, ...], noise_amplitudes[i], seeds[i], 
+                                        disp_insts[i], names[i]) for i in range_)
         for ispec in specs:
             stack.add_spec(ispec)
 
@@ -2021,10 +2195,9 @@ class Stack(Spectra):
         return stacked_flux, stacked_err
 
     @utils.timer(name='Line Flux Integration')
-    def calc_line_flux_ratios(self, line, dw=5, tag='', sky_lines=None, save=False, conf=None, path=''):
+    def calc_line_flux_ratios(self, line, dw=5, tag='', sky_lines=None, sky_penalty=False, save=False, conf=None, path=''):
         """
         Calculate the F-number of each spectrum: F = mean flux / RMS of the surrounding spectrum.
-
         :param line: float, int
             The center wavelength at which to integrate (angstroms).
         :param dw: float, int
@@ -2124,6 +2297,25 @@ class Stack(Spectra):
             for _line in sky_lines:
                 rest = maths.cosmological_redshift(_line, self[i].redshift)
                 info[self[i].name][f'sky_flag_{_line}'] = 1 if np.abs(rest - line) <= 2*dw else 0
+            if conf:
+                confs[self[i].name] = self[i].data[conf]
+
+            if sky_penalty and self[i].sky is not None:
+                # Repeat the F-ratio procedure for the sky flux
+                sky_norm, sky_err = self._norm(self[i].sky, self[i].error, window_full)
+                mean_left = np.nanmean(sky_norm[window_left])
+                mean_right = np.nanmean(sky_norm[window_right])
+                slope = (mean_right - mean_left) / (_wl + _wr)
+                intercept = mean_left - slope * (line - _wl)
+
+                y = slope * full_wave + intercept
+
+                full_sky = sky_norm[window_full] - y
+
+                rms = np.sqrt(np.mean(full_sky[window_lr] ** 2))
+
+                out[self[i].name] -= (np.mean(full_sky[window_center]) / rms).astype(np.float64)
+
             if conf:
                 confs[self[i].name] = self[i].data[conf]
 
@@ -2355,7 +2547,7 @@ class Stack(Spectra):
                 # fig.write_image(fname.replace('.html', '.pdf'), width=1280, height=540)
 
     def plot_spectra(self, fname_root, spectra='all', _range=None, ylim=None, title_text=None, backend='plotly',
-                     plot_model=None, f=None, shade_reg=None):
+                     plot_model=None, f=None, shade_reg=None, normalized=False):
         """
         Spectra.plot_spectra but incorporates the information from self.normalized.
 
@@ -2378,7 +2570,7 @@ class Stack(Spectra):
                         fname = os.path.join(fname_root, self[item].name.replace(' ', '_') + '.spectrum' + fmt)
                     self[item].plot(fname=fname,
                                     backend=backend, _range=_range, ylim=ylim, title_text=ttl, plot_model=plot_model,
-                                    shade_reg=shade_reg)
+                                    shade_reg=shade_reg, normalized=normalized)
         else:
             for i, item in enumerate(tqdm.tqdm(self)):
                 if item in spectra:
@@ -2397,7 +2589,7 @@ class Stack(Spectra):
                         fname = os.path.join(fname_root, self[item].name.replace(' ', '_') + '.spectrum' + fmt)
                     self[item].plot(fname=fname,
                                     backend=backend, _range=_range, ylim=ylim, title_text=ttl, plot_model=plot_model,
-                                    shade_reg=shade_reg)
+                                    shade_reg=shade_reg, normalized=normalized)
         print('Done.')
 
     def plot_hist(self, fname_base, plot_log=False, backend='plotly'):
