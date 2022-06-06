@@ -13,8 +13,8 @@ line_name = ['metal_abs', 'generic_line']
 
 # Construct and train the neural network to find detections for the line in question
 nn = bf.NeuralNet()
-# nn.train(line_name, target_line=0, size=100_000, epochs=11)
-nn.load('neuralnet_training_data/bifrost.neuralnet.h5', line_name, target_line=0)
+nn.train(line_name, target_line=0, size=100_000, epochs=11)
+# nn.load('neuralnet_training_data/bifrost.neuralnet.h5', line_name, target_line=0)
 
 for path in ['example_data/spec-7721-57360-0412.fits', 'example_data/spec-7673-57329-0248.fits']:
     test_spec = bf.Spectrum.from_fits(path, None)
