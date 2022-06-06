@@ -23,7 +23,7 @@ setuptools.setup(
     author_email="michael.reefe8@gmail.com",
     description="Correct, normalize, coadd, and stack spectra together.",
     long_description=long_description,
-    long_description_content_type="text/x-md",
+    long_description_content_type="text/markdown",
     packages=setuptools.find_packages(),
     include_package_data=True,
     install_requires=install_requires,
