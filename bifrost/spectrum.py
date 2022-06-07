@@ -679,16 +679,16 @@ class Spectrum:
         except:
             ebv = 0.04
 
-        # Convert to little-endian so numba works properly
-        if wave.dtype == '>f4':
+        # Convert to native endianness so numba works properly
+        if wave.dtype.byteorder != '=':
             wave.byteswap(inplace=True)
-            wave.dtype = '<f4'
-        if flux.dtype == '>f4':
+            wave = wave.newbyteorder('=')
+        if flux.dtype.byteorder != '=':
             flux.byteswap(inplace=True)
-            flux.dtype = '<f4'
-        if error.dtype == '>f4':
+            flux = flux.newbyteorder('=')
+        if error.dtype.byteorder != '=':
             error.byteswap(inplace=True)
-            error.dtype = '<f4'
+            error = error.newbyteorder('=')
 
         return cls(wave, flux, error, sky, redshift=z, ra=ra / 15, dec=dec, ebv=ebv, name=name, **data_dict)
 
