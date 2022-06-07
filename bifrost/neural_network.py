@@ -431,8 +431,7 @@ class NeuralNet:
         # Perform the neural network predictions across each window
         probability_model = tf.keras.Sequential([self.model, tf.keras.layers.Activation(p_layer)])
         conf = probability_model.predict(data).T[0]
-        cflux = maths.spectres(cwave, wave, flux, error, fill=np.nan)[0]
-        cflux /= np.nanpercentile(cflux, 0.999)
+        cflux, _, _ = self.normalize(maths.spectres(cwave, wave, flux, error, fill=np.nan)[0])
 
         # Plot the probability vs. wavelength
         if plot:
