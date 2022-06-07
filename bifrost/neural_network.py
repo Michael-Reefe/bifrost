@@ -432,7 +432,7 @@ class NeuralNet:
         probability_model = tf.keras.Sequential([self.model, tf.keras.layers.Activation(p_layer)])
         conf = probability_model.predict(data).T[0]
         cflux = maths.spectres(cwave, wave, flux, error, fill=np.nan)[0]
-        cflux /= np.nanmedian(cflux)
+        cflux /= np.nanpercentile(cflux, 0.999)
 
         # Plot the probability vs. wavelength
         if plot:
@@ -448,7 +448,7 @@ class NeuralNet:
             fig.add_trace(pgo.Scatter(x=cwave, y=conf, line=dict(color='red', width=2), name='Confidence', showlegend=False))
             fig.add_trace(pgo.Scatter(x=cwave, y=cflux, line=dict(color='black', width=1), name='Flux', showlegend=False))
             fig.update_layout(
-                xaxis_title=r'$\lambda (\AA)$',
+                xaxis_title=r'$\lambda (A)$',
                 yaxis_title=r'Confidence | Flux (normalized)',
                 template='plotly_white'
             )

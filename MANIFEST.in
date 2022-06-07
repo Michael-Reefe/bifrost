@@ -1,2 +1,3 @@
 recursive-include bifrost *
 recursive-include config *
+include requirements.txt
